@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libicu-dev \
         libzip-dev \
         libpq-dev \
+        locales \
         unzip \
         git \
     && docker-php-ext-configure intl \
@@ -35,7 +36,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pdo_pgsql \
         zip \
     && a2enmod rewrite \
+    && sed -i '/en_US.UTF-8/s/^# //' /etc/locale.gen \
+    && locale-gen \
     && rm -rf /var/lib/apt/lists/*
+
+# Firefly III formats currency via PHP's setlocale(LC_MONETARY, ...), which needs
+# the locale actually generated on the OS (see app/Support/Amount.php) - separate
+# from the ext-intl/ICU data above, which works without this. Without it, the app
+# shows "Invalid server configuration: unable to format monetary amounts" even for
+# English. Add more `sed` lines / locale-gen entries here if other locales are needed.
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
