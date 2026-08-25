@@ -99,6 +99,19 @@ return [
     'ipinfo_token'                         => env('IPINFO_TOKEN', ''),
     'static_cron_token'                    => env('STATIC_CRON_TOKEN'),
 
+    // bank connection expiry check (custom, not upstream): warns in-app when a
+    // linked Enable Banking session is about to expire, see
+    // app/Support/Cronjobs/BankConnectionCronjob.php
+    'bank_connection_check'                => [
+        'enabled'               => env('BANK_CONNECTION_CHECK_ENABLED', false),
+        'enable_banking_app_id' => env('ENABLE_BANKING_APP_ID', ''),
+        'private_key_file'      => env('ENABLE_BANKING_PRIVATE_KEY_FILE', ''),
+        'config_directory'      => env('BANK_CONNECTION_CONFIG_DIR', ''),
+        'importer_url'          => env('BANK_CONNECTION_IMPORTER_URL', ''),
+        'warn_days'             => (int) env('BANK_CONNECTION_WARN_DAYS', 7),
+        'urgent_days'           => (int) env('BANK_CONNECTION_URGENT_DAYS', 1),
+    ],
+
     // flags
     'enable_external_map'                  => env('ENABLE_EXTERNAL_MAP', false), // no longer used, only for default.
     'disable_frame_header'                 => env('DISABLE_FRAME_HEADER', false),

@@ -7,8 +7,6 @@ until php -r "new PDO('mysql:host=${DB_HOST};port=${DB_PORT}', '${DB_USERNAME}',
 done
 echo "Database is reachable."
 
-chown -R www-data:www-data storage bootstrap/cache
-
 php artisan migrate --force
 php artisan config:clear
 php artisan route:clear

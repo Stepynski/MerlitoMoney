@@ -77,6 +77,15 @@ class Range
             app('view')->share('upgrade_security_message', AppConfiguration::get('upgrade_security_message')->data);
             app('view')->share('upgrade_security_level', AppConfiguration::get('upgrade_security_level')->data);
         }
+
+        // share bank connection expiry warnings (not upstream, see BankConnectionCronjob):
+        if (AppConfiguration::hasSetting('bank_connection_warnings')) {
+            $warnings = AppConfiguration::get('bank_connection_warnings')->data;
+            if (is_array($warnings) && count($warnings) > 0) {
+                app('view')->share('bank_connection_warnings', $warnings);
+                app('view')->share('bank_connection_importer_url', (string) config('firefly.bank_connection_check.importer_url'));
+            }
+        }
     }
 
     /**

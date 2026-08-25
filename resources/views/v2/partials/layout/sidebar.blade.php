@@ -4,11 +4,11 @@
         <!--begin::Brand Link-->
         <a href="{{route('index') }}" class="brand-link">
             <!--begin::Brand Image-->
-            <img src="images/logo.png" alt="Firefly III Logo"
+            <img src="images/logo.png" alt="MerlitoMoney logo"
                  class="brand-image opacity-75 shadow">
             <!--end::Brand Image-->
             <!--begin::Brand Text-->
-            <span class="brand-text fw-light">Firefly III</span>
+            <span class="brand-text fw-light">MerlitoMoney</span>
             <!--end::Brand Text-->
         </a>
         <!--end::Brand Link-->

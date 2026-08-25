@@ -22,6 +22,8 @@ services:
     env_file: .env
     volumes:
       - upload_data:/var/www/html/storage/upload
+      - ./secrets:/secrets:ro
+      - ./import-configs:/import-configs:ro
     ports:
       - "8080:80"
     depends_on:
@@ -34,6 +36,9 @@ services:
     container_name: merlitomoney_importer
     restart: unless-stopped
     env_file: .importer.env
+    volumes:
+      - ./secrets:/secrets:ro
+      - ./import-configs:/import:ro
     depends_on:
       - app
     networks:
@@ -59,12 +64,19 @@ services:
     image: alpine
     container_name: merlitomoney_cron
     restart: unless-stopped
-    env_file: .env
+    environment:
+      TZ: Europe/Amsterdam
+    env_file:
+      - .env
+      - .importer.env
     command: ["sh", "-c", "apk add --no-cache tzdata curl && \
-      echo \"0 3 * * * curl -fsS http://app:80/api/v1/cron/$$STATIC_CRON_TOKEN > /dev/null\" | crontab - && \
+      { echo \"0 3 * * * curl -fsS http://app:80/api/v1/cron/$$STATIC_CRON_TOKEN > /dev/null\"; \
+        echo \"0 6,18 * * * curl -fsS -X POST http://importer:8080/autoimport -d secret=$$AUTO_IMPORT_SECRET -d directory=/import > /dev/null\"; \
+      } | crontab - && \
       crond -f -L /dev/stdout"]
     depends_on:
       - app
+      - importer
     networks:
       - merlitomoney
 

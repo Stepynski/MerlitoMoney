@@ -7,6 +7,8 @@ yarn-error.log
 .env
 .importer.env
 /certs/
+/secrets/
+/import-configs/
 /.ci/php-cs-fixer/vendor
 coverage.xml
 output.txt

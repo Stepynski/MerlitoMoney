@@ -1,7 +1,7 @@
 <tr>
 <td class="header">
 <a href="#" style="display: inline-block;">
-Firefly III
+MerlitoMoney
 </a>
 </td>
 </tr>

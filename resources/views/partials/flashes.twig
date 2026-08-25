@@ -8,6 +8,26 @@
     </div>
 {% endif %}
 
+{# BANK CONNECTION EXPIRY WARNING (custom, not upstream) #}
+{% if bank_connection_warnings is defined %}
+    {% for warning in bank_connection_warnings %}
+        <div class="alert alert-{{ warning.level }} alert-dismissible" role="alert">
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span><span class="sr-only">{{ 'close'|_ }}</span>
+            </button>
+            <span class="fa fa-university"></span>
+            <strong>{{ warning.bank }}</strong>
+            {% if warning.days_left == 0 %}
+                {{ 'bank_connection_expires_today'|_ }}
+            {% else %}
+                {{ Lang.choice('firefly.bank_connection_expires_in_days', warning.days_left, {count: warning.days_left}) }}
+            {% endif %}
+            &mdash;
+            <a href="{{ bank_connection_importer_url }}/authenticate-flow/eb">{{ 'bank_connection_reconnect_link'|_ }}</a>
+        </div>
+    {% endfor %}
+{% endif %}
+
 {# MANDATORY UPDATE MESSAGE #}
 {% if upgrade_security_message and upgrade_security_level %}
     <div class="alert alert-{{ upgrade_security_level }} alert-dismissible" role="alert">
