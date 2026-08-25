@@ -5,6 +5,8 @@ public/hot
 npm-debug.log
 yarn-error.log
 .env
+.importer.env
+/certs/
 /.ci/php-cs-fixer/vendor
 coverage.xml
 output.txt
