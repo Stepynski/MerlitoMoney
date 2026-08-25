@@ -29,6 +29,32 @@ services:
     networks:
       - merlitomoney
 
+  importer:
+    image: fireflyiii/data-importer:latest
+    container_name: merlitomoney_importer
+    restart: unless-stopped
+    env_file: .importer.env
+    depends_on:
+      - app
+    networks:
+      - merlitomoney
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: merlitomoney_caddy
+    restart: unless-stopped
+    ports:
+      - "8444:8444"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - importer
+    networks:
+      - merlitomoney
+
   cron:
     image: alpine
     container_name: merlitomoney_cron
@@ -45,6 +71,8 @@ services:
 volumes:
   db_data:
   upload_data:
+  caddy_data:
+  caddy_config:
 
 networks:
   merlitomoney:
