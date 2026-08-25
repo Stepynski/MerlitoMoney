@@ -64,10 +64,10 @@
             {{ $pageTitle }} »
         @endif
 
-        @if($title !== 'Firefly III')
+        @if($title !== 'MerlitoMoney')
             {{ $title }} »
         @endif
-        Firefly III
+        MerlitoMoney
     </title>
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">

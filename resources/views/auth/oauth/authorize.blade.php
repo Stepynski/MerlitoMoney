@@ -5,7 +5,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>Firefly III - Authorization</title>
+    <title>MerlitoMoney - Authorization</title>
 
     <!-- Styles -->
     <link href="/v1/lib/bs/css/bootstrap.min.css?v=x" rel="stylesheet" type="text/css" nonce="y">

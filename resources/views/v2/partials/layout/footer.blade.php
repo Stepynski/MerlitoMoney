@@ -11,6 +11,7 @@
     </div>
     <!--end::To the end-->
     <!--begin::Copyright-->
+    <a href="https://github.com/Stepynski/MerlitoMoney">MerlitoMoney</a>, a fork of
     <a href="https://github.com/firefly-iii/firefly-iii/">Firefly III</a> &copy; James Cole,
     <a href="https://github.com/firefly-iii/firefly-iii/blob/main/LICENSE">AGPL-3.0-or-later</a>
     <!--end::Copyright-->

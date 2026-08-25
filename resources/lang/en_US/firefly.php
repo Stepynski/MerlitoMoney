@@ -216,7 +216,7 @@ return [
     'button_reset_password'                               => 'Reset password',
     'reset_button'                                        => 'Reset',
     'want_to_login'                                       => 'I want to login',
-    'login_page_title'                                    => 'Login to Firefly III',
+    'login_page_title'                                    => 'Login to MerlitoMoney',
     'register_page_title'                                 => 'Register at Firefly III',
     'forgot_pw_page_title'                                => 'Forgot your password for Firefly III',
     'reset_pw_page_title'                                 => 'Reset your password for Firefly III',

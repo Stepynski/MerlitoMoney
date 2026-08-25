@@ -5,7 +5,7 @@
     <div class="card mb-3">
         <div class="card-body">
             <p class="">
-                Welcome to the Firefly III demo!<br/>
+                Welcome to the MerlitoMoney demo!<br/>
                 <br/>
                 To log in, please use email address <strong>{{ $DEMO_USERNAME }}</strong> with password
                 <strong>{{ $DEMO_PASSWORD }}</strong>.
