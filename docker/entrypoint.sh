@@ -18,4 +18,9 @@ php artisan firefly-iii:upgrade-database
 php artisan firefly-iii:laravel-passport-keys
 php artisan firefly-iii:instructions update
 
+# The artisan commands above run as root and create new cache/session files
+# (e.g. storage/framework/cache/data/**), so re-chown after they run - Apache
+# serves as www-data and needs to write into those same paths.
+chown -R www-data:www-data storage bootstrap/cache
+
 exec "$@"

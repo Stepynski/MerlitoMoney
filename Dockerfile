@@ -11,12 +11,22 @@
 
 # NOTE: upstream firefly-iii dropped building the legacy v1 (Vue2/webpack) frontend
 # from its own release pipeline as of commit fd8791d08d ("No longer build v1,
-# remove some old code.") because it no longer builds cleanly. We follow suit and
-# only build v2 (Vite). Revisit if/when upstream restores or fully removes v1.
+# remove some old code.") because it no longer builds cleanly. v1 is still the
+# active UI for most of the app (budgets, reports, logout, etc.) though - v2 only
+# covers newer pages - so skipping it breaks core functionality, not just cosmetics.
+# Root cause: resources/assets/v1/package.json pins vue-loader@^17, which is for
+# Vue 3; this is a Vue 2 project and needs vue-loader@15. Fixed the pin, but npm
+# workspaces then nests vue-loader under resources/assets/v1/node_modules instead
+# of hoisting it to the root, where laravel-mix (which resolves relative to its
+# own location) can't see it - triggering Mix's "auto-install missing deps" path,
+# which is itself destructive under npm workspaces (wipes node_modules instead of
+# fixing it). Pinning the same vue-loader version as a root devDependency (see
+# package.json) forces correct hoisting and avoids that path ever triggering.
 FROM node:22-bookworm-slim AS frontend
 WORKDIR /app
 COPY . .
 RUN npm install \
+    && npm run prod --workspace=resources/assets/v1 \
     && npm run build --workspace=resources/assets/v2
 
 FROM php:8.5-apache AS final
@@ -59,7 +69,7 @@ WORKDIR /var/www/html
 # closed-source GitHub Action (JC5/firefly-iii-dev) not available to us. English
 # strings are bundled into the JS itself, so this only affects other locales.
 COPY . .
-COPY --from=frontend /app/public/build ./public/build
+COPY --from=frontend /app/public ./public
 
 RUN composer install --no-dev --no-interaction --no-scripts --optimize-autoloader \
     && mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/testing storage/framework/views storage/upload \
