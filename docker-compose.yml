@@ -22,6 +22,8 @@ services:
     env_file: .env
     volumes:
       - upload_data:/var/www/html/storage/upload
+      - ./secrets:/secrets:ro
+      - ./import-configs:/import-configs:ro
     ports:
       - "8080:80"
     depends_on:

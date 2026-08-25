@@ -55,6 +55,7 @@ final class CronController extends Controller
         }
         $return['bill_notifications']     = $this->billWarningCronJob($config['force'], $config['date']);
         $return['webhooks']               = $this->webhookCronJob($config['force'], $config['date']);
+        $return['bank_connections']       = $this->bankConnectionsCronJob($config['force'], $config['date']);
 
         return response()->api($return);
     }

@@ -27,6 +27,7 @@ namespace FireflyIII\Support\Http\Controllers;
 use Carbon\Carbon;
 use FireflyIII\Exceptions\FireflyException;
 use FireflyIII\Support\Cronjobs\AutoBudgetCronjob;
+use FireflyIII\Support\Cronjobs\BankConnectionCronjob;
 use FireflyIII\Support\Cronjobs\BillWarningCronjob;
 use FireflyIII\Support\Cronjobs\ExchangeRatesCronjob;
 use FireflyIII\Support\Cronjobs\RecurringCronjob;
@@ -37,6 +38,27 @@ use FireflyIII\Support\Cronjobs\WebhookCronjob;
  */
 trait CronRunner
 {
+    protected function bankConnectionsCronJob(bool $force, Carbon $date): array
+    {
+        /** @var BankConnectionCronjob $bankConnections */
+        $bankConnections = app(BankConnectionCronjob::class);
+        $bankConnections->setForce($force);
+        $bankConnections->setDate($date);
+
+        try {
+            $bankConnections->fire();
+        } catch (FireflyException $e) {
+            return ['job_fired' => false, 'job_succeeded' => false, 'job_errored' => true, 'message' => $e->getMessage()];
+        }
+
+        return [
+            'job_fired'     => $bankConnections->jobFired,
+            'job_succeeded' => $bankConnections->jobSucceeded,
+            'job_errored'   => $bankConnections->jobErrored,
+            'message'       => $bankConnections->message,
+        ];
+    }
+
     protected function billWarningCronJob(bool $force, Carbon $date): array
     {
         /** @var BillWarningCronjob $billWarning */
