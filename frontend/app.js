@@ -175,6 +175,13 @@ function computeView() {
   const expView = s.view === 'expenses';
 
   const nav = [['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['overview', 'Overview', 'ic-bars'], ['budget', 'Budget', 'ic-gauge']];
+  const PAGE_TINT = {
+    accounts: 'linear-gradient(180deg,#e9f1ff 0%,#eef0f3 260px)',
+    categories: 'linear-gradient(180deg,#f4ecff 0%,#eef0f3 260px)',
+    balance: 'linear-gradient(180deg,#e8faf0 0%,#eef0f3 260px)',
+    overview: 'linear-gradient(180deg,#fff3e6 0%,#eef0f3 260px)',
+    budget: 'linear-gradient(180deg,#e6faf7 0%,#eef0f3 260px)'
+  };
 
   let cells;
   if (s.page === 'accounts') {
@@ -365,6 +372,7 @@ function computeView() {
 
   return {
     isNarrow: s.narrow, isWide: !s.narrow,
+    pageTint: PAGE_TINT[s.page] || PAGE_TINT.accounts,
     spendableBalance: money(spendable), totalBalance: money(total),
     periodTitle: P.title, periodRange: dm(P.start) + ' – ' + dm(P.end),
     mode: s.mode,
@@ -776,8 +784,10 @@ function renderApp() {
       </section>
     </div>`;
 
-  const main = `<main style="flex:1;width:100%;max-width:1080px;margin:0 auto;padding:14px clamp(10px,2.4vw,20px) 110px;display:flex;flex-direction:column;gap:14px">
-    ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}
+  const main = `<main style="flex:1;width:100%;background:${V.pageTint};transition:background .3s ease">
+    <div style="max-width:1080px;margin:0 auto;padding:14px clamp(10px,2.4vw,20px) 110px;display:flex;flex-direction:column;gap:14px">
+      ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}
+    </div>
   </main>`;
 
   const bottomNav = !V.isNarrow ? '' : `
@@ -793,7 +803,7 @@ function renderApp() {
     <div data-click="${H(() => { state.drawerOpen = false; render(); })}" style="position:fixed;inset:0;z-index:60;background:rgba(20,24,32,0.42);animation:kb-in .18s ease both">
       <div data-click="${H(e => e.stopPropagation())}" style="width:min(300px,82vw);height:100%;background:#f7f8fa;display:flex;flex-direction:column;box-shadow:4px 0 24px rgba(16,24,40,0.2)">
         <div style="background:linear-gradient(135deg,#6ea8fe,#e599f7 55%,#ffc9c9);padding:22px 20px 18px;display:flex;flex-direction:column;gap:10px">
-          <span style="width:56px;height:56px;border-radius:50%;background:#fff;display:grid;place-items:center;overflow:hidden"><img src="cat-logo.png" alt="MerlitoMoney" style="width:72%;height:72%;object-fit:contain"></span>
+          <span style="width:56px;height:56px;border-radius:18px;background:#ffd43b;display:grid;place-items:center;overflow:hidden"><img src="cat-logo.png" alt="MerlitoMoney" style="width:74%;height:74%;object-fit:contain"></span>
           <span style="font-weight:700;font-size:19px">MerlitoMoney</span>
         </div>
         ${V.drawerItems.map(d => `
