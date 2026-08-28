@@ -1,16 +1,125 @@
 'use strict';
 
 // ---------- constants ----------
-const RED = '#d93a34', GREEN = '#2f9e44', GREY = '#6b7280', BLUE = '#3b5bdb';
-const ACCENT = BLUE;
-const HERO_GRADIENT = 'linear-gradient(135deg,#6ea8fe,#e599f7 55%,#ffc9c9)';
+const RED = '#d93a34', GREEN = '#2f9e44';
+let TH = null, ACCENT = null, GREY = null;
 const PAL = ['#1f6fd0', '#e03b34', '#4caf50', '#f4703a', '#12897f', '#f2a25c', '#7048c8', '#b6d334', '#5b46b8', '#26aee8', '#ef5b8c', '#e8a33d', '#a531b5', '#c0173f', '#8b6ce0'];
+
+// ---------- themes: 4 styles x light/dark ----------
+const THEME_STYLES = [
+  { key: 'colorful', label: 'Colorful' },
+  { key: 'professional', label: 'Professional' },
+  { key: 'kakeibo', label: 'Kakeibo' },
+  { key: 'mono', label: 'Mono' }
+];
+const THEMES = {
+  colorful: {
+    light: {
+      pageBg: '#eef0f3', surface: '#fff', surface2: '#f7f8fa', border: '#e3e7ee',
+      text: '#1b1f26', textSoft: '#6b7280', textFaint: '#9aa1ad',
+      accent: '#3b5bdb', accentSoft: '#e7ebfd',
+      hero: 'linear-gradient(135deg,#6ea8fe,#e599f7 55%,#ffc9c9)',
+      tint: {
+        accounts: 'linear-gradient(180deg,#e9f1ff 0%,#eef0f3 260px)',
+        categories: 'linear-gradient(180deg,#f4ecff 0%,#eef0f3 260px)',
+        balance: 'linear-gradient(180deg,#e8faf0 0%,#eef0f3 260px)',
+        overview: 'linear-gradient(180deg,#fff3e6 0%,#eef0f3 260px)',
+        budget: 'linear-gradient(180deg,#e6faf7 0%,#eef0f3 260px)'
+      }
+    },
+    dark: {
+      pageBg: '#14161b', surface: '#1e2128', surface2: '#262a33', border: '#333844',
+      text: '#eef0f3', textSoft: '#9aa3b2', textFaint: '#6b7280',
+      accent: '#6f93ff', accentSoft: '#28304a',
+      hero: 'linear-gradient(135deg,#3d5aa8,#7a4a96 55%,#a85f6a)',
+      tint: {
+        accounts: 'linear-gradient(180deg,#1b2740 0%,#14161b 260px)',
+        categories: 'linear-gradient(180deg,#2a2140 0%,#14161b 260px)',
+        balance: 'linear-gradient(180deg,#183024 0%,#14161b 260px)',
+        overview: 'linear-gradient(180deg,#332714 0%,#14161b 260px)',
+        budget: 'linear-gradient(180deg,#153230 0%,#14161b 260px)'
+      }
+    }
+  },
+  professional: {
+    light: {
+      pageBg: '#f2f4f7', surface: '#fff', surface2: '#eaeef4', border: '#dde2ea',
+      text: '#0f1a2e', textSoft: '#5b6472', textFaint: '#8a92a0',
+      accent: '#1c3f7c', accentSoft: '#e2e8f5',
+      hero: 'linear-gradient(120deg,#0f1a2e,#1c3f7c)',
+      tint: { accounts: '#f2f4f7', categories: '#f2f4f7', balance: '#f2f4f7', overview: '#f2f4f7', budget: '#f2f4f7' }
+    },
+    dark: {
+      pageBg: '#0b0f17', surface: '#131824', surface2: '#1a2030', border: '#262e40',
+      text: '#eef1f5', textSoft: '#8a92a0', textFaint: '#5b6472',
+      accent: '#5b8def', accentSoft: '#1e2c4d',
+      hero: 'linear-gradient(120deg,#060810,#111b30)',
+      tint: { accounts: '#0b0f17', categories: '#0b0f17', balance: '#0b0f17', overview: '#0b0f17', budget: '#0b0f17' }
+    }
+  },
+  kakeibo: {
+    light: {
+      pageBg: '#f7f1e6', surface: '#fffaf2', surface2: '#f0e6d2', border: '#e6d8bd',
+      text: '#2e2418', textSoft: '#7a6a52', textFaint: '#a3927a',
+      accent: '#b5651d', accentSoft: '#f3e0cc',
+      hero: 'linear-gradient(135deg,#e8b96a,#d98d6b 55%,#c96a5c)',
+      tint: {
+        accounts: 'linear-gradient(180deg,#f2e6cf 0%,#f7f1e6 260px)',
+        categories: 'linear-gradient(180deg,#f0e2d8 0%,#f7f1e6 260px)',
+        balance: 'linear-gradient(180deg,#eee6cd 0%,#f7f1e6 260px)',
+        overview: 'linear-gradient(180deg,#f3e0c8 0%,#f7f1e6 260px)',
+        budget: 'linear-gradient(180deg,#efe4cf 0%,#f7f1e6 260px)'
+      }
+    },
+    dark: {
+      pageBg: '#1c1610', surface: '#2a2219', surface2: '#352b1f', border: '#4a3d2c',
+      text: '#f3e9d8', textSoft: '#b3a084', textFaint: '#7a6a52',
+      accent: '#e0975a', accentSoft: '#4a3620',
+      hero: 'linear-gradient(135deg,#6b4a26,#8a4a3a 55%,#6b3530)',
+      tint: {
+        accounts: 'linear-gradient(180deg,#2c2314 0%,#1c1610 260px)',
+        categories: 'linear-gradient(180deg,#2c2018 0%,#1c1610 260px)',
+        balance: 'linear-gradient(180deg,#2a2414 0%,#1c1610 260px)',
+        overview: 'linear-gradient(180deg,#2e2416 0%,#1c1610 260px)',
+        budget: 'linear-gradient(180deg,#2b2416 0%,#1c1610 260px)'
+      }
+    }
+  },
+  mono: {
+    light: {
+      pageBg: '#fafafa', surface: '#fff', surface2: '#f0f0f0', border: '#e0e0e0',
+      text: '#111111', textSoft: '#666666', textFaint: '#999999',
+      accent: '#0a7d5c', accentSoft: '#dff2ea',
+      hero: '#111111',
+      tint: { accounts: '#fafafa', categories: '#fafafa', balance: '#fafafa', overview: '#fafafa', budget: '#fafafa' }
+    },
+    dark: {
+      pageBg: '#0a0a0a', surface: '#161616', surface2: '#202020', border: '#2e2e2e',
+      text: '#f2f2f2', textSoft: '#a0a0a0', textFaint: '#6e6e6e',
+      accent: '#2fd996', accentSoft: '#16332a',
+      hero: '#000000',
+      tint: { accounts: '#0a0a0a', categories: '#0a0a0a', balance: '#0a0a0a', overview: '#0a0a0a', budget: '#0a0a0a' }
+    }
+  }
+};
+function currentTheme() {
+  const style = THEMES[state.themeStyle] ? state.themeStyle : 'colorful';
+  const mode = THEMES[style][state.themeMode] ? state.themeMode : 'light';
+  return THEMES[style][mode];
+}
 const ICONS = ['ic-cart', 'ic-fork', 'ic-car', 'ic-bag', 'ic-health', 'ic-home', 'ic-play', 'ic-dots', 'ic-salary', 'ic-refresh', 'ic-gift', 'ic-star', 'ic-bank', 'ic-wallet', 'ic-cash', 'ic-piggy', 'ic-transfer', 'ic-receipt'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const M3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAYS = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 
 // ---------- state ----------
+function loadThemePref(key, fallback) {
+  try { const v = localStorage.getItem(key); return v || fallback; } catch (e) { return fallback; }
+}
+function saveThemePref(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
+}
+
 const state = {
   authed: false, loginError: '',
   accounts: [], cats: [], tx: [], budgets: {},
@@ -18,6 +127,8 @@ const state = {
   fAccounts: [], fTypes: [], fCats: [], filtersOpen: false, expanded: null,
   narrow: window.matchMedia('(max-width: 859px)').matches,
   drawerOpen: false, modal: null, editId: null,
+  themeStyle: loadThemePref('mm_theme_style', 'colorful'),
+  themeMode: loadThemePref('mm_theme_mode', window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
   form: { name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense' }
 };
 
@@ -173,6 +284,29 @@ function wire(root) {
 }
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
+function themeSettingsHtml() {
+  return `
+    <div style="background:${TH.surface};border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px">
+      <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em">Theme</span>
+      <div style="display:flex;gap:8px">
+        ${['light', 'dark'].map(m => {
+          const on = state.themeMode === m;
+          return `<button data-click="${H(() => { state.themeMode = m; saveThemePref('mm_theme_mode', m); render(); })}" style="flex:1;border:1.5px solid ${on ? ACCENT : TH.border};background:${on ? TH.accentSoft : 'transparent'};color:${on ? ACCENT : TH.text};border-radius:10px;padding:9px;cursor:pointer;font-weight:600;font-size:13.5px;text-transform:capitalize">${m}</button>`;
+        }).join('')}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+        ${THEME_STYLES.map(s => {
+          const on = state.themeStyle === s.key;
+          const preview = THEMES[s.key][state.themeMode];
+          return `<button data-click="${H(() => { state.themeStyle = s.key; saveThemePref('mm_theme_style', s.key); render(); })}" style="border:1.5px solid ${on ? ACCENT : TH.border};background:${on ? TH.accentSoft : 'transparent'};border-radius:12px;padding:10px;cursor:pointer;display:flex;align-items:center;gap:9px;text-align:left">
+            <span style="width:22px;height:22px;border-radius:50%;flex:none;background:${preview.hero};border:1px solid ${TH.border}"></span>
+            <span style="font-size:13.5px;font-weight:${on ? '700' : '500'};color:${on ? ACCENT : TH.text}">${s.label}</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
 // ---------- view model (ported from the design's renderVals()) ----------
 function computeView() {
   const s = state, P = period(), T = totals(), M = months();
@@ -182,27 +316,20 @@ function computeView() {
   const expView = s.view === 'expenses';
 
   const nav = [['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['overview', 'Overview', 'ic-bars'], ['budget', 'Budget', 'ic-gauge']];
-  const PAGE_TINT = {
-    accounts: 'linear-gradient(180deg,#e9f1ff 0%,#eef0f3 260px)',
-    categories: 'linear-gradient(180deg,#f4ecff 0%,#eef0f3 260px)',
-    balance: 'linear-gradient(180deg,#e8faf0 0%,#eef0f3 260px)',
-    overview: 'linear-gradient(180deg,#fff3e6 0%,#eef0f3 260px)',
-    budget: 'linear-gradient(180deg,#e6faf7 0%,#eef0f3 260px)'
-  };
 
   let cells;
   if (s.page === 'accounts') {
     cells = [
-      { label: 'Spendable', value: money(spendable), color: '#1b1f26' },
+      { label: 'Spendable', value: money(spendable), color: TH.text },
       { label: 'Savings', value: money(total - spendable), color: GREEN },
-      { label: 'Net worth', value: money(total), color: '#1b1f26' }
+      { label: 'Net worth', value: money(total), color: TH.text }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else if (s.page === 'balance') {
     const net = T.rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0);
     cells = [
       { label: 'Start balance', value: money(total - net), color: GREY },
       { label: 'Change', value: money(net, true), color: net < 0 ? RED : GREEN },
-      { label: 'End balance', value: money(total), color: '#1b1f26' }
+      { label: 'End balance', value: money(total), color: TH.text }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else {
     const sel = k => s.view === k;
@@ -211,7 +338,7 @@ function computeView() {
       { key: 'saldo', label: 'Saldo', value: money(saldo, true), color: saldo < 0 ? RED : GREEN },
       { key: 'income', label: s.page === 'budget' ? 'Budget INCOME' : 'Income', value: money(T.inc), color: GREEN }
     ].map(c => Object.assign(c, {
-      labelColor: sel(c.key) ? '#1b1f26' : GREY, weight: sel(c.key) ? '700' : '500',
+      labelColor: sel(c.key) ? TH.text : GREY, weight: sel(c.key) ? '700' : '500',
       underline: sel(c.key) ? c.color : 'transparent', cursor: 'pointer',
       onClick: () => { s.view = c.key; render(); }
     }));
@@ -256,7 +383,7 @@ function computeView() {
     return {
       name: c.name, color: c.color, icon: '#' + c.icon, total: money(t),
       budgetNote: lim ? money(lim) : (T.counts[c.id] || 0) + ' mov.',
-      budgetColor: lim ? (t > lim ? RED : GREY) : '#a9b0bb',
+      budgetColor: lim ? (t > lim ? RED : GREY) : TH.textFaint,
       onClick: () => openModal('category', c.id, { name: c.name, icon: c.icon, color: c.color, kind: c.kind })
     };
   });
@@ -278,7 +405,7 @@ function computeView() {
     g.net += isExp ? -t.amount : isInc ? t.amount : 0;
     g.items.push({
       title: c ? c.name : (t.type === 'Transfer internal' ? 'Internal transfer' : 'External transfer'),
-      icon: '#' + (c ? c.icon : 'ic-transfer'), color: c ? c.color : '#8b93a1',
+      icon: '#' + (c ? c.icon : 'ic-transfer'), color: c ? c.color : GREY,
       account: a ? a.name : '—', accountIcon: '#' + (a ? a.icon : 'ic-wallet'),
       amount: money(isExp ? -t.amount : t.amount, isInc), type: t.type,
       amountColor: isExp ? RED : isInc ? GREEN : GREY
@@ -290,10 +417,10 @@ function computeView() {
   }));
   const chip = (label, icon, color, active, onClick) => ({
     label, icon: '#' + icon, onClick, active,
-    border: active ? color : '#e0e3e9', bg: active ? color + '14' : '#fff', color: active ? color : '#5c6473'
+    border: active ? color : TH.border, bg: active ? color + '14' : TH.surface, color: active ? color : GREY
   });
   const filterGroups = [
-    { title: 'Movement type', items: [['Income', 'ic-salary', GREEN], ['Expense', 'ic-cart', RED], ['Transfer internal', 'ic-transfer', BLUE], ['Transfer external', 'ic-transfer', '#7b8494']].map(t => chip(t[0], t[1], t[2], s.fTypes.indexOf(t[0]) >= 0, () => { toggle('fTypes', t[0]); render(); })) },
+    { title: 'Movement type', items: [['Income', 'ic-salary', GREEN], ['Expense', 'ic-cart', RED], ['Transfer internal', 'ic-transfer', ACCENT], ['Transfer external', 'ic-transfer', GREY]].map(t => chip(t[0], t[1], t[2], s.fTypes.indexOf(t[0]) >= 0, () => { toggle('fTypes', t[0]); render(); })) },
     { title: 'Accounts', items: s.accounts.map(a => chip(a.name, a.icon, a.color, s.fAccounts.indexOf(a.id) >= 0, () => { toggle('fAccounts', a.id); render(); })) },
     { title: 'Expense categories', items: s.cats.filter(c => c.kind === 'expense').map(c => chip(c.name, c.icon, c.color, s.fCats.indexOf(c.id) >= 0, () => { toggle('fCats', c.id); render(); })) },
     { title: 'Income categories', items: s.cats.filter(c => c.kind === 'income').map(c => chip(c.name, c.icon, c.color, s.fCats.indexOf(c.id) >= 0, () => { toggle('fCats', c.id); render(); })) }
@@ -328,7 +455,7 @@ function computeView() {
     label: b.label, height: Math.max(0.5, b.total / peak * 100) + '%', tip: b.full + ' · ' + money(b.total),
     segments: Object.keys(b.byCat).sort((x, y) => b.byCat[y] - b.byCat[x]).map(id => {
       const c = cat(+id);
-      return { h: (b.byCat[id] / b.total * 100) + '%', color: c ? c.color : '#9aa1ad' };
+      return { h: (b.byCat[id] / b.total * 100) + '%', color: c ? c.color : TH.textFaint };
     })
   }));
   const spanDays = Math.max(1, Math.round((Math.min(P.end, new Date()) - P.start) / 86400000) + 1);
@@ -380,7 +507,7 @@ function computeView() {
 
   return {
     isNarrow: s.narrow, isWide: !s.narrow,
-    pageTint: PAGE_TINT[s.page] || PAGE_TINT.accounts,
+    pageTint: TH.tint[s.page] || TH.tint.accounts,
     spendableBalance: money(spendable), totalBalance: money(total),
     periodTitle: P.title, periodRange: dm(P.start) + ' – ' + dm(P.end),
     mode: s.mode,
@@ -388,8 +515,8 @@ function computeView() {
       const on = s.page === p[0];
       return {
         label: p[1], icon: '#' + p[2], onClick: () => { s.page = p[0]; s.expanded = null; render(); },
-        color: on ? ACCENT : '#6b7280', weight: on ? '600' : '400',
-        underline: on ? ACCENT : 'transparent', pill: on ? '#e7ebfd' : 'transparent'
+        color: on ? ACCENT : GREY, weight: on ? '600' : '400',
+        underline: on ? ACCENT : 'transparent', pill: on ? TH.accentSoft : 'transparent'
       };
     }),
     summaryCells: cells,
@@ -400,11 +527,11 @@ function computeView() {
     legend, catSections,
     filtersOpen: s.filtersOpen,
     filterGroups, filterCount: fCount ? '(' + fCount + ')' : '',
-    filterBorder: fCount ? ACCENT : '#dfe3ea', filterColor: fCount ? ACCENT : '#3a4150',
+    filterBorder: fCount ? ACCENT : TH.border, filterColor: fCount ? ACCENT : GREY,
     dayGroups, noRows: rows.length === 0,
     movementSummary: rows.length + ' movements · net ' + money(rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0), true),
     axis, bars, barGap: bars.length > 20 ? '2px' : bars.length > 10 ? '5px' : '12px', averages, ranking,
-    globalBg: gOver ? '#fdecea' : '#fff', globalTrack: gOver ? '#f6cfcb' : '#eceef2',
+    globalBg: gOver ? '#fdecea' : TH.surface, globalTrack: gOver ? '#f6cfcb' : TH.border,
     globalColor: gOver ? RED : ACCENT, globalPct: Math.round(gPct) + '%',
     globalWidth: Math.min(100, gPct) + '%', globalSpent: money(gSp), globalLimit: money(gLim),
     globalRemaining: gOver ? money(gSp - gLim) + ' over' : money(gLim - gSp) + ' left',
@@ -433,18 +560,18 @@ function computeView() {
     formAmount: s.form.amount, formAccount: s.form.account, formToAccount: s.form.toAccount,
     accountKinds: [['spend', 'Account', 'ic-wallet'], ['save', 'Savings account', 'ic-piggy']].map(k => ({
       value: k[0], label: k[1], icon: '#' + k[2],
-      ring: s.form.kind === k[0] ? ACCENT : '#c8cdd6', dot: s.form.kind === k[0] ? ACCENT : 'transparent'
+      ring: s.form.kind === k[0] ? ACCENT : TH.border, dot: s.form.kind === k[0] ? ACCENT : 'transparent'
     })),
     isSavingsKind: s.form.kind === 'save',
     formName: s.form.name, formType: s.form.type, formBalance: s.form.balance, formGoal: s.form.goal,
     formColor: s.form.color, formIconRef: '#' + s.form.icon,
     iconChoices: ICONS.map(i => ({
       value: i, ref: '#' + i,
-      border: s.form.icon === i ? s.form.color : '#e6e9ee',
-      bg: s.form.icon === i ? s.form.color : '#fff',
-      fg: s.form.icon === i ? '#fff' : '#5c6473'
+      border: s.form.icon === i ? s.form.color : TH.border,
+      bg: s.form.icon === i ? s.form.color : TH.surface,
+      fg: s.form.icon === i ? '#fff' : GREY
     })),
-    colorChoices: PAL.map(c => ({ value: c, ring: s.form.color === c ? '#1b1f26' : 'transparent' })),
+    colorChoices: PAL.map(c => ({ value: c, ring: s.form.color === c ? TH.text : 'transparent' })),
     canDelete: !!s.editId,
     formCategory: s.form.category, formLimit: s.form.limit,
     budgetCatOptions: (s.editId ? [cat(s.editId)] : unbudgeted()).filter(Boolean).map(c => ({ v: c.id, l: c.name })),
@@ -455,6 +582,11 @@ function computeView() {
 
 // ---------- rendering ----------
 function render() {
+  TH = currentTheme();
+  ACCENT = TH.accent;
+  GREY = TH.textSoft;
+  document.body.style.background = TH.pageBg;
+  document.body.style.color = TH.text;
   handlers = [];
   const root = document.getElementById('root');
   root.innerHTML = state.authed ? renderApp() : renderLogin();
@@ -476,29 +608,29 @@ function render() {
 function renderLogin() {
   return `
   <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px">
-    <form id="login-form" style="background:#fff;border-radius:20px;padding:28px 26px;width:100%;max-width:340px;box-shadow:0 8px 30px rgba(16,24,40,0.12);display:flex;flex-direction:column;gap:14px">
+    <form id="login-form" style="background:${TH.surface};border-radius:20px;padding:28px 26px;width:100%;max-width:340px;box-shadow:0 8px 30px rgba(16,24,40,0.12);display:flex;flex-direction:column;gap:14px">
       <span style="width:56px;height:56px;border-radius:18px;background:#ffd43b;color:#1b1f26;display:grid;place-items:center;font-weight:700;font-size:24px;margin:0 auto">K</span>
       <span style="font-weight:700;font-size:20px;text-align:center">MerlitoMoney</span>
-      <input id="f-password" type="password" placeholder="Password" style="border:1px solid #dfe3ea;border-radius:12px;padding:12px 13px;font-size:15px;outline:none" autofocus>
+      <input id="f-password" type="password" placeholder="Password" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;font-size:15px;outline:none" autofocus>
       ${state.loginError ? `<span style="color:${RED};font-size:13px">${esc(state.loginError)}</span>` : ''}
-      <button type="submit" style="border:0;background:${BLUE};color:#fff;border-radius:12px;padding:12px;cursor:pointer;font-weight:600;font-size:15px">Log in</button>
+      <button type="submit" style="border:0;background:${ACCENT};color:#fff;border-radius:12px;padding:12px;cursor:pointer;font-weight:600;font-size:15px">Log in</button>
     </form>
   </div>`;
 }
 
 function iconBtn(V, ariaLabel, iconId, size, onClick, extraStyle) {
-  return `<button data-click="${H(onClick)}" aria-label="${ariaLabel}" style="border:0;background:transparent;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:#3a4150;flex:none${extraStyle || ''}"><svg width="${size}" height="${size}"><use href="#${iconId}"></use></svg></button>`;
+  return `<button data-click="${H(onClick)}" aria-label="${ariaLabel}" style="border:0;background:transparent;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none${extraStyle || ''}"><svg width="${size}" height="${size}"><use href="#${iconId}"></use></svg></button>`;
 }
 
 function renderApp() {
   const V = computeView();
 
   const header = `
-  <header style="position:sticky;top:0;z-index:30;background:${HERO_GRADIENT};box-shadow:0 1px 0 rgba(0,0,0,0.07)">
+  <header style="position:sticky;top:0;z-index:30;background:${TH.hero};box-shadow:0 1px 0 rgba(0,0,0,0.07)">
     <div style="display:flex;align-items:center;gap:8px;padding:10px clamp(10px,2.4vw,20px)">
       ${V.isNarrow ? iconBtn(V, 'Menu', 'ic-menu', 22, () => { state.drawerOpen = !state.drawerOpen; render(); }) : '<span style="width:40px;flex:none"></span>'}
       <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0">
-        <span style="font-size:12px;color:#6b7280">Accounts balance</span>
+        <span style="font-size:12px;color:${GREY}">Accounts balance</span>
         <span style="font-size:clamp(20px,3.4vw,26px);font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.01em">${V.spendableBalance}</span>
         <span style="font-size:12px;color:#2f9e44;font-variant-numeric:tabular-nums">Total ${V.totalBalance}</span>
       </div>
@@ -507,22 +639,22 @@ function renderApp() {
     </div>
 
     <div style="display:flex;align-items:center;justify-content:center;gap:clamp(8px,3vw,26px);padding:2px clamp(10px,2.4vw,20px) 12px">
-      <button data-click="${H(() => { shiftPeriod(-1); render(); })}" aria-label="Previous period" style="border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:#3b5bdb;flex:none"><svg width="20" height="20"><use href="#ic-left"></use></svg></button>
-      <div style="position:relative;border:1px solid #d7dbe3;border-radius:14px;padding:7px 16px;min-width:min(300px,72vw);text-align:center;background:#fff">
+      <button data-click="${H(() => { shiftPeriod(-1); render(); })}" aria-label="Previous period" style="border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${ACCENT};flex:none"><svg width="20" height="20"><use href="#ic-left"></use></svg></button>
+      <div style="position:relative;border:1px solid ${TH.border};border-radius:14px;padding:7px 16px;min-width:min(300px,72vw);text-align:center;background:${TH.surface}">
         <div style="display:flex;align-items:center;justify-content:center;gap:7px;font-weight:600;letter-spacing:0.02em">
-          <svg width="17" height="17" style="color:#3b5bdb"><use href="#ic-calendar"></use></svg>
+          <svg width="17" height="17" style="color:${ACCENT}"><use href="#ic-calendar"></use></svg>
           ${V.periodTitle}
-          <svg width="16" height="16" style="color:#6b7280"><use href="#ic-down"></use></svg>
+          <svg width="16" height="16" style="color:${GREY}"><use href="#ic-down"></use></svg>
         </div>
-        <div style="font-size:12px;color:#6b7280;margin-top:1px;font-variant-numeric:tabular-nums">${V.periodRange}</div>
+        <div style="font-size:12px;color:${GREY};margin-top:1px;font-variant-numeric:tabular-nums">${V.periodRange}</div>
         <select data-change="${H(e => { state.mode = e.target.value; render(); })}" aria-label="Timeframe" style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer;border:0;background:transparent">
           ${['week', 'month', 'quarter', 'year'].map(m => `<option value="${m}" ${V.mode === m ? 'selected' : ''}>${m[0].toUpperCase() + m.slice(1)}</option>`).join('')}
         </select>
       </div>
-      <button data-click="${H(() => { shiftPeriod(1); render(); })}" aria-label="Next period" style="border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:#3b5bdb;flex:none"><svg width="20" height="20"><use href="#ic-right"></use></svg></button>
+      <button data-click="${H(() => { shiftPeriod(1); render(); })}" aria-label="Next period" style="border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${ACCENT};flex:none"><svg width="20" height="20"><use href="#ic-right"></use></svg></button>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid #eceef2;background:#f7f8fa">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid ${TH.border};background:${TH.surface2}">
       ${V.summaryCells.map(c => `
         <button data-click="${H(c.onClick)}" style="border:0;border-bottom:3px solid ${c.underline};background:transparent;padding:10px 6px 9px;cursor:${c.cursor};display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0">
           <span style="font-size:13px;font-weight:${c.weight};color:${c.labelColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${c.label}</span>
@@ -534,18 +666,18 @@ function renderApp() {
   const accountsPage = !V.isAccounts ? '' : `
     <div style="display:flex;flex-direction:column;gap:14px;animation:kb-up .25s ease both">
       ${V.accountGroups.map(g => `
-        <section style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:#f7f8fa;border-bottom:1px solid #eceef2">
+        <section style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:${TH.surface2};border-bottom:1px solid ${TH.border}">
             <span style="font-weight:600;font-size:14px">${g.title}</span>
             <span style="font-weight:600;color:#2f9e44;font-variant-numeric:tabular-nums">${g.total}</span>
           </div>
           ${g.items.map(a => `
-            <button data-click="${H(a.onClick)}" style="width:100%;text-align:left;border:0;border-bottom:1px solid #f1f2f5;background:#fff;padding:14px 18px;display:flex;align-items:center;gap:14px;cursor:pointer">
+            <button data-click="${H(a.onClick)}" style="width:100%;text-align:left;border:0;border-bottom:1px solid ${TH.border};background:${TH.surface};padding:14px 18px;display:flex;align-items:center;gap:14px;cursor:pointer">
               <span style="width:42px;height:42px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="21" height="21"><use href="${a.icon}"></use></svg></span>
               <span style="flex:1;display:flex;flex-direction:column;gap:3px;min-width:0">
                 <span style="display:flex;align-items:baseline;gap:8px">
                   <span style="font-weight:600">${a.name}</span>
-                  <span style="font-size:12px;color:#8b93a1">${a.type}</span>
+                  <span style="font-size:12px;color:${GREY}">${a.type}</span>
                 </span>
                 <span style="font-weight:600;color:#2f9e44;font-variant-numeric:tabular-nums">${a.balance}</span>
                 ${a.hasGoal ? `
@@ -553,23 +685,23 @@ function renderApp() {
                     <span style="flex:1;height:7px;border-radius:4px;background:#e9ebef;overflow:hidden;display:block">
                       <span style="display:block;height:100%;width:${a.goalPct};background:#40c057"></span>
                     </span>
-                    <span style="font-size:12px;color:#6b7280;font-variant-numeric:tabular-nums">${a.goalLabel}</span>
+                    <span style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${a.goalLabel}</span>
                   </span>` : ''}
               </span>
-              <span style="font-size:12px;color:#9aa1ad;text-align:right;flex:none">${a.meta}</span>
+              <span style="font-size:12px;color:${TH.textFaint};text-align:right;flex:none">${a.meta}</span>
             </button>`).join('')}
         </section>`).join('')}
-      <button data-click="${H(() => openModal('account'))}" style="align-self:flex-start;border:1px solid #d7dbe3;background:#fff;border-radius:12px;padding:11px 18px;cursor:pointer;font-weight:600;color:#3b5bdb;display:flex;align-items:center;gap:8px">
+      <button data-click="${H(() => openModal('account'))}" style="align-self:flex-start;border:1px solid ${TH.border};background:${TH.surface};border-radius:12px;padding:11px 18px;cursor:pointer;font-weight:600;color:${ACCENT};display:flex;align-items:center;gap:8px">
         <svg width="18" height="18"><use href="#ic-plus"></use></svg>Add account
       </button>
     </div>`;
 
   const categoriesPage = !V.isCategories ? '' : `
     <div style="display:flex;flex-direction:column;gap:14px;animation:kb-up .25s ease both">
-      <section style="background:#fff;border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-wrap:wrap;align-items:center;gap:22px">
+      <section style="background:${TH.surface};border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-wrap:wrap;align-items:center;gap:22px">
         <div style="position:relative;width:168px;height:168px;flex:none;margin:0 auto;background:${V.donut};border-radius:50%">
-          <div style="position:absolute;inset:30%;background:#fff;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px">
-            <span style="font-size:11px;color:#8b93a1">${V.donutLabel}</span>
+          <div style="position:absolute;inset:30%;background:${TH.surface};border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px">
+            <span style="font-size:11px;color:${GREY}">${V.donutLabel}</span>
             <span style="font-size:13px;font-weight:700;font-variant-numeric:tabular-nums">${V.donutTotal}</span>
           </div>
         </div>
@@ -578,7 +710,7 @@ function renderApp() {
             <div style="display:flex;align-items:center;gap:10px">
               <span style="width:26px;height:26px;border-radius:50%;background:${l.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="14" height="14"><use href="${l.icon}"></use></svg></span>
               <span style="flex:1;font-size:14px">${l.name}</span>
-              <span style="font-size:13px;color:#6b7280;font-variant-numeric:tabular-nums">${l.amount}</span>
+              <span style="font-size:13px;color:${GREY};font-variant-numeric:tabular-nums">${l.amount}</span>
               <span style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;width:52px;text-align:right">${l.pct}</span>
             </div>`).join('')}
         </div>
@@ -587,11 +719,11 @@ function renderApp() {
         <section style="display:flex;flex-direction:column;gap:10px">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px">
             <span style="font-weight:700;font-size:15px">${sec.title}</span>
-            <span style="font-size:13px;color:#6b7280;font-variant-numeric:tabular-nums">${sec.total}</span>
+            <span style="font-size:13px;color:${GREY};font-variant-numeric:tabular-nums">${sec.total}</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px">
             ${sec.items.map(c => `
-              <button data-click="${H(c.onClick)}" style="background:#fff;border:0;border-radius:14px;padding:14px 10px 16px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+              <button data-click="${H(c.onClick)}" style="background:${TH.surface};border:0;border-radius:14px;padding:14px 10px 16px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
                 <span style="font-size:14px;font-weight:500;text-align:center;line-height:1.2">${c.name}</span>
                 <span style="width:52px;height:52px;border-radius:50%;background:${c.color};color:#fff;display:grid;place-items:center"><svg width="26" height="26"><use href="${c.icon}"></use></svg></span>
                 <span style="display:flex;flex-direction:column;align-items:center;gap:1px">
@@ -599,7 +731,7 @@ function renderApp() {
                   <span style="font-size:12px;color:${c.budgetColor};font-variant-numeric:tabular-nums">${c.budgetNote}</span>
                 </span>
               </button>`).join('')}
-            <button data-click="${H(() => openModal('category', null, { kind: state.view === 'income' ? 'income' : 'expense', name: '' }))}" style="background:transparent;border:1.5px dashed #cdd2db;border-radius:14px;padding:14px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#7b8494;min-height:130px">
+            <button data-click="${H(() => openModal('category', null, { kind: state.view === 'income' ? 'income' : 'expense', name: '' }))}" style="background:transparent;border:1.5px dashed ${TH.border};border-radius:14px;padding:14px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:${GREY};min-height:130px">
               <svg width="24" height="24"><use href="#ic-plus"></use></svg>
               <span style="font-size:13px;font-weight:500">New category</span>
             </button>
@@ -610,17 +742,17 @@ function renderApp() {
   const balancePage = !V.isBalance ? '' : `
     <div style="display:flex;flex-direction:column;gap:12px;animation:kb-up .25s ease both">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <button data-click="${H(() => { state.filtersOpen = !state.filtersOpen; render(); })}" style="border:1px solid ${V.filterBorder};background:#fff;color:${V.filterColor};border-radius:11px;padding:9px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;font-weight:500;font-size:14px">
+        <button data-click="${H(() => { state.filtersOpen = !state.filtersOpen; render(); })}" style="border:1px solid ${V.filterBorder};background:${TH.surface};color:${V.filterColor};border-radius:11px;padding:9px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;font-weight:500;font-size:14px">
           <svg width="17" height="17"><use href="#ic-filter"></use></svg>Filters ${V.filterCount}
         </button>
         <span style="flex:1"></span>
-        <span style="font-size:13px;color:#6b7280;font-variant-numeric:tabular-nums">${V.movementSummary}</span>
+        <span style="font-size:13px;color:${GREY};font-variant-numeric:tabular-nums">${V.movementSummary}</span>
       </div>
       ${V.filtersOpen ? `
-        <section style="background:#fff;border-radius:16px;padding:6px 16px 16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);animation:kb-in .2s ease both">
+        <section style="background:${TH.surface};border-radius:16px;padding:6px 16px 16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);animation:kb-in .2s ease both">
           ${V.filterGroups.map(g => `
             <div style="padding-top:14px">
-              <div style="font-size:12px;font-weight:600;color:#8b93a1;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:9px">${g.title}</div>
+              <div style="font-size:12px;font-weight:600;color:${GREY};text-transform:uppercase;letter-spacing:0.06em;margin-bottom:9px">${g.title}</div>
               <div style="display:flex;flex-wrap:wrap;gap:8px">
                 ${g.items.map(i => `
                   <button data-click="${H(i.onClick)}" style="border:1.4px solid ${i.border};background:${i.bg};color:${i.color};border-radius:10px;padding:7px 12px;cursor:pointer;font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:7px">
@@ -628,51 +760,51 @@ function renderApp() {
                   </button>`).join('')}
               </div>
             </div>`).join('')}
-          <button data-click="${H(() => { state.fAccounts = []; state.fTypes = []; state.fCats = []; render(); })}" style="margin-top:16px;border:0;background:transparent;color:#3b5bdb;cursor:pointer;font-weight:600;font-size:13.5px;padding:0">Reset all filters</button>
+          <button data-click="${H(() => { state.fAccounts = []; state.fTypes = []; state.fCats = []; render(); })}" style="margin-top:16px;border:0;background:transparent;color:${ACCENT};cursor:pointer;font-weight:600;font-size:13.5px;padding:0">Reset all filters</button>
         </section>` : ''}
-      <section style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+      <section style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
         ${V.dayGroups.map(d => `
           <div>
-            <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:#f7f8fa;border-top:1px solid #eceef2;border-bottom:1px solid #eceef2">
+            <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:${TH.surface2};border-top:1px solid ${TH.border};border-bottom:1px solid ${TH.border}">
               <span style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1;min-width:30px">${d.day}</span>
               <span style="display:flex;flex-direction:column;gap:0;flex:1">
-                <span style="font-size:11px;color:#8b93a1;letter-spacing:0.07em">${d.weekday}</span>
-                <span style="font-size:11.5px;font-weight:600;color:#5c6473;letter-spacing:0.05em">${d.month}</span>
+                <span style="font-size:11px;color:${GREY};letter-spacing:0.07em">${d.weekday}</span>
+                <span style="font-size:11.5px;font-weight:600;color:${GREY};letter-spacing:0.05em">${d.month}</span>
               </span>
               <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${d.netColor}">${d.net}</span>
             </div>
             ${d.items.map(t => `
-              <div style="display:flex;align-items:center;gap:13px;padding:12px 16px;border-bottom:1px solid #f4f5f7">
+              <div style="display:flex;align-items:center;gap:13px;padding:12px 16px;border-bottom:1px solid ${TH.border}">
                 <span style="width:38px;height:38px;border-radius:50%;background:${t.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="19" height="19"><use href="${t.icon}"></use></svg></span>
                 <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
                   <span style="font-weight:600;font-size:14.5px">${t.title}</span>
-                  <span style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:#7b8494">
+                  <span style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:${GREY}">
                     <svg width="13" height="13"><use href="${t.accountIcon}"></use></svg>${t.account}
                   </span>
                 </span>
                 <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none">
                   <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${t.amountColor}">${t.amount}</span>
-                  <span style="font-size:11.5px;color:#9aa1ad">${t.type}</span>
+                  <span style="font-size:11.5px;color:${TH.textFaint}">${t.type}</span>
                 </span>
               </div>`).join('')}
           </div>`).join('')}
-        ${V.noRows ? `<div style="padding:44px 20px;text-align:center;color:#8b93a1">No movements match these filters.</div>` : ''}
+        ${V.noRows ? `<div style="padding:44px 20px;text-align:center;color:${GREY}">No movements match these filters.</div>` : ''}
       </section>
     </div>`;
 
   const overviewPage = !V.isOverview ? '' : `
     <div style="display:flex;flex-direction:column;gap:14px;animation:kb-up .25s ease both">
-      <section style="background:#fff;border-radius:16px;padding:16px 16px 12px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+      <section style="background:${TH.surface};border-radius:16px;padding:16px 16px 12px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
         <div style="display:grid;grid-template-columns:46px 1fr;gap:6px">
-          <div style="display:flex;flex-direction:column;justify-content:space-between;height:210px;font-size:11px;color:#9aa1ad;text-align:right;font-variant-numeric:tabular-nums;padding-right:4px">
+          <div style="display:flex;flex-direction:column;justify-content:space-between;height:210px;font-size:11px;color:${TH.textFaint};text-align:right;font-variant-numeric:tabular-nums;padding-right:4px">
             ${V.axis.map(a => `<span>${a}</span>`).join('')}
           </div>
           <div style="position:relative;height:210px">
-            <span style="position:absolute;left:0;right:0;top:0;height:1px;background:#eceef2"></span>
-            <span style="position:absolute;left:0;right:0;top:25%;height:1px;background:#eceef2"></span>
-            <span style="position:absolute;left:0;right:0;top:50%;height:1px;background:#eceef2"></span>
-            <span style="position:absolute;left:0;right:0;top:75%;height:1px;background:#eceef2"></span>
-            <span style="position:absolute;left:0;right:0;bottom:0;height:1px;background:#d7dbe3"></span>
+            <span style="position:absolute;left:0;right:0;top:0;height:1px;background:${TH.border}"></span>
+            <span style="position:absolute;left:0;right:0;top:25%;height:1px;background:${TH.border}"></span>
+            <span style="position:absolute;left:0;right:0;top:50%;height:1px;background:${TH.border}"></span>
+            <span style="position:absolute;left:0;right:0;top:75%;height:1px;background:${TH.border}"></span>
+            <span style="position:absolute;left:0;right:0;bottom:0;height:1px;background:${TH.border}"></span>
             <div style="position:absolute;inset:0;display:flex;align-items:flex-end;gap:${V.barGap}">
               ${V.bars.map(b => `
                 <div title="${b.tip}" style="flex:1;height:${b.height};display:flex;flex-direction:column;justify-content:flex-end;border-radius:3px 3px 0 0;overflow:hidden;min-height:1px">
@@ -682,41 +814,41 @@ function renderApp() {
           </div>
           <span></span>
           <div style="display:flex;gap:${V.barGap};padding-top:6px">
-            ${V.bars.map(b => `<span style="flex:1;text-align:center;font-size:10.5px;color:#9aa1ad;font-variant-numeric:tabular-nums;overflow:hidden">${b.label}</span>`).join('')}
+            ${V.bars.map(b => `<span style="flex:1;text-align:center;font-size:10.5px;color:${TH.textFaint};font-variant-numeric:tabular-nums;overflow:hidden">${b.label}</span>`).join('')}
           </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px">
           ${V.averages.map(a => `
             <div style="background:#f4f5f8;border-radius:11px;padding:10px 8px;display:flex;flex-direction:column;align-items:center;gap:2px">
-              <span style="font-size:12px;color:#6b7280">${a.label}</span>
+              <span style="font-size:12px;color:${GREY}">${a.label}</span>
               <span style="font-weight:600;color:${a.color};font-variant-numeric:tabular-nums;font-size:14.5px">${a.value}</span>
             </div>`).join('')}
         </div>
       </section>
-      <section style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+      <section style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
         ${V.ranking.map(r => `
-          <div style="border-bottom:1px solid #f1f2f5">
-            <button data-click="${H(r.onClick)}" style="width:100%;text-align:left;border:0;background:#fff;padding:12px 16px;display:flex;align-items:center;gap:13px;cursor:pointer">
+          <div style="border-bottom:1px solid ${TH.border}">
+            <button data-click="${H(r.onClick)}" style="width:100%;text-align:left;border:0;background:${TH.surface};padding:12px 16px;display:flex;align-items:center;gap:13px;cursor:pointer">
               <span style="width:40px;height:40px;border-radius:50%;background:${r.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="20" height="20"><use href="${r.icon}"></use></svg></span>
               <span style="flex:1;display:flex;flex-direction:column;gap:5px;min-width:0">
                 <span style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
-                  <span style="font-weight:600;font-size:14.5px">${r.name} <span style="color:#9aa1ad;font-weight:400">${r.count}</span></span>
+                  <span style="font-weight:600;font-size:14.5px">${r.name} <span style="color:${TH.textFaint};font-weight:400">${r.count}</span></span>
                   <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${r.amountColor}">${r.amount}</span>
                 </span>
                 <span style="display:flex;align-items:center;gap:8px">
                   <span style="font-size:12px;font-weight:600;color:${r.color};font-variant-numeric:tabular-nums;width:34px">${r.pct}</span>
-                  <span style="flex:1;height:7px;border-radius:4px;background:#eceef2;overflow:hidden;display:block">
+                  <span style="flex:1;height:7px;border-radius:4px;background:${TH.border};overflow:hidden;display:block">
                     <span style="display:block;height:100%;width:${r.width};background:${r.color}"></span>
                   </span>
                 </span>
               </span>
-              <span style="width:30px;height:30px;border-radius:50%;border:1px solid #e3e6eb;display:grid;place-items:center;color:#7b8494;flex:none"><svg width="16" height="16"><use href="${r.chevron}"></use></svg></span>
+              <span style="width:30px;height:30px;border-radius:50%;border:1px solid ${TH.border};display:grid;place-items:center;color:${GREY};flex:none"><svg width="16" height="16"><use href="${r.chevron}"></use></svg></span>
             </button>
             ${r.open ? `
               <div style="background:#f8f9fb;padding:4px 16px 12px 68px;animation:kb-in .18s ease both">
                 ${r.detail.map(d => `
-                  <div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #eceef2;font-size:13.5px">
-                    <span style="color:#5c6473">${d.left}</span>
+                  <div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid ${TH.border};font-size:13.5px">
+                    <span style="color:${GREY}">${d.left}</span>
                     <span style="font-variant-numeric:tabular-nums;font-weight:500">${d.right}</span>
                   </div>`).join('')}
               </div>` : ''}
@@ -737,20 +869,20 @@ function renderApp() {
           </span>
           <span style="font-weight:700;color:${V.globalColor};font-variant-numeric:tabular-nums;font-size:14px">${V.globalPct}</span>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:13px;color:#5c6473;font-variant-numeric:tabular-nums">
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:${GREY};font-variant-numeric:tabular-nums">
           <span>Spent: ${V.globalSpent}</span><span>Limit: ${V.globalLimit}</span>
         </div>
       </section>
       <section style="display:flex;flex-direction:column;gap:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px">
           <span style="font-weight:700;font-size:15px">Categories in budget</span>
-          <button data-click="${H(() => openModal('budget', null, { category: (unbudgeted()[0] || {}).id || '', limit: '150' }))}" style="border:0;background:transparent;color:#3b5bdb;font-weight:600;cursor:pointer;font-size:13.5px;display:flex;align-items:center;gap:6px;padding:0">
+          <button data-click="${H(() => openModal('budget', null, { category: (unbudgeted()[0] || {}).id || '', limit: '150' }))}" style="border:0;background:transparent;color:${ACCENT};font-weight:600;cursor:pointer;font-size:13.5px;display:flex;align-items:center;gap:6px;padding:0">
             <svg width="16" height="16"><use href="#ic-plus"></use></svg>Add budget
           </button>
         </div>
-        <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+        <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
           ${V.budgetRows.map(b => `
-            <button data-click="${H(b.onClick)}" style="width:100%;text-align:left;border:0;border-bottom:1px solid #f1f2f5;background:#fff;padding:13px 16px;display:flex;align-items:center;gap:13px;cursor:pointer">
+            <button data-click="${H(b.onClick)}" style="width:100%;text-align:left;border:0;border-bottom:1px solid ${TH.border};background:${TH.surface};padding:13px 16px;display:flex;align-items:center;gap:13px;cursor:pointer">
               <span style="width:40px;height:40px;border-radius:50%;background:${b.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="20" height="20"><use href="${b.icon}"></use></svg></span>
               <span style="flex:1;display:flex;flex-direction:column;gap:5px;min-width:0">
                 <span style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
@@ -759,23 +891,23 @@ function renderApp() {
                 </span>
                 <span style="display:flex;align-items:center;gap:8px">
                   <span style="font-size:12px;font-weight:600;color:${b.barColor};font-variant-numeric:tabular-nums;width:38px">${b.pct}</span>
-                  <span style="flex:1;height:8px;border-radius:4px;background:#eceef2;overflow:hidden;display:block">
+                  <span style="flex:1;height:8px;border-radius:4px;background:${TH.border};overflow:hidden;display:block">
                     <span style="display:block;height:100%;width:${b.width};background:${b.barColor};transition:width .4s ease"></span>
                   </span>
                 </span>
-                <span style="display:flex;justify-content:space-between;font-size:12.5px;color:#7b8494;font-variant-numeric:tabular-nums">
+                <span style="display:flex;justify-content:space-between;font-size:12.5px;color:${GREY};font-variant-numeric:tabular-nums">
                   <span>Spent: ${b.spent}</span><span>Limit: ${b.limit}</span>
                 </span>
               </span>
             </button>`).join('')}
-          ${V.noBudgets ? `<div style="padding:34px 20px;text-align:center;color:#8b93a1">No budgets yet. Pick a category below.</div>` : ''}
+          ${V.noBudgets ? `<div style="padding:34px 20px;text-align:center;color:${GREY}">No budgets yet. Pick a category below.</div>` : ''}
         </div>
       </section>
       <section style="display:flex;flex-direction:column;gap:10px">
         <span style="font-weight:700;font-size:15px;padding:0 4px">Without budget</span>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px">
           ${V.unbudgeted.map(u => `
-            <button data-click="${H(u.onClick)}" style="background:#fff;border:0;border-radius:14px;padding:14px 10px 16px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+            <button data-click="${H(u.onClick)}" style="background:${TH.surface};border:0;border-radius:14px;padding:14px 10px 16px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
               <span style="font-size:14px;font-weight:500;text-align:center;line-height:1.2">${u.name}</span>
               <span style="width:48px;height:48px;border-radius:50%;background:${u.color};color:#fff;display:grid;place-items:center"><svg width="24" height="24"><use href="${u.icon}"></use></svg></span>
               <span style="font-weight:600;font-variant-numeric:tabular-nums">${u.spent}</span>
@@ -791,7 +923,7 @@ function renderApp() {
   </main>`;
 
   const bottomNav = !V.isNarrow ? '' : `
-    <nav style="position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid #e3e6eb;display:grid;grid-template-columns:repeat(5,1fr);padding:6px 4px 8px">
+    <nav style="position:fixed;left:0;right:0;bottom:0;z-index:30;background:${TH.surface};border-top:1px solid ${TH.border};display:grid;grid-template-columns:repeat(5,1fr);padding:6px 4px 8px">
       ${V.navItems.map(n => `
         <button data-click="${H(n.onClick)}" style="border:0;background:transparent;padding:4px 2px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:${n.color}">
           <span style="padding:4px 16px;border-radius:14px;background:${n.pill};display:grid;place-items:center"><svg width="22" height="22"><use href="${n.icon}"></use></svg></span>
@@ -801,14 +933,15 @@ function renderApp() {
 
   const drawer = !V.drawerOpen ? '' : `
     <div data-click="${H(() => { state.drawerOpen = false; render(); })}" style="position:fixed;inset:0;z-index:60;background:rgba(20,24,32,0.42);animation:kb-in .18s ease both">
-      <div data-click="${H(e => e.stopPropagation())}" style="width:min(300px,82vw);height:100%;background:#f7f8fa;display:flex;flex-direction:column;box-shadow:4px 0 24px rgba(16,24,40,0.2)">
-        <div style="background:${HERO_GRADIENT};padding:22px 20px 18px;display:flex;flex-direction:column;gap:10px">
+      <div data-click="${H(e => e.stopPropagation())}" style="width:min(300px,82vw);height:100%;background:${TH.surface2};display:flex;flex-direction:column;box-shadow:4px 0 24px rgba(16,24,40,0.2)">
+        <div style="background:${TH.hero};padding:22px 20px 18px;display:flex;flex-direction:column;gap:10px">
           <span style="width:56px;height:56px;border-radius:18px;background:#ffd43b;display:grid;place-items:center;overflow:hidden"><img src="cat-logo.png" alt="MerlitoMoney" style="width:74%;height:74%;object-fit:contain"></span>
           <span style="font-weight:700;font-size:19px">MerlitoMoney</span>
         </div>
+        <div style="padding:14px 16px 4px">${themeSettingsHtml()}</div>
         ${V.drawerItems.map(d => `
           <button data-click="${H(() => { state.drawerOpen = false; render(); })}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px">
-            <svg width="21" height="21" style="color:#3a4150"><use href="${d.icon}"></use></svg>${d.label}
+            <svg width="21" height="21" style="color:${GREY}"><use href="${d.icon}"></use></svg>${d.label}
           </button>`).join('')}
         <button data-click="${H(() => logoutAction())}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${RED};margin-top:auto">
           <svg width="21" height="21"><use href="#ic-close"></use></svg>Log out
@@ -818,23 +951,23 @@ function renderApp() {
 
   const modal = !V.showModal ? '' : `
     <div data-click="${H(() => { state.modal = null; render(); })}" style="position:fixed;inset:0;z-index:70;background:rgba(20,24,32,0.42);display:flex;align-items:center;justify-content:center;padding:16px;animation:kb-in .16s ease both">
-      <div data-click="${H(e => e.stopPropagation())}" style="background:#f7f8fa;border-radius:22px;width:100%;max-width:460px;max-height:88vh;overflow:auto;box-shadow:0 24px 60px rgba(16,24,40,0.3);animation:kb-up .2s ease both">
-        <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:#f7f8fa;z-index:2">
+      <div data-click="${H(e => e.stopPropagation())}" style="background:${TH.surface2};border-radius:22px;width:100%;max-width:460px;max-height:88vh;overflow:auto;box-shadow:0 24px 60px rgba(16,24,40,0.3);animation:kb-up .2s ease both">
+        <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:${TH.surface2};z-index:2">
           <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
           <span style="font-size:19px;font-weight:700;flex:1">${V.modalTitle}</span>
-          ${V.isSettingsModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:#e7ebfd;color:#3b5bdb;border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
+          ${V.isSettingsModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
         </div>
         <div style="padding:0 18px 20px;display:flex;flex-direction:column;gap:14px">
           ${V.isMovementModal ? `
             <div style="display:flex;flex-direction:column;gap:14px">
-              <div style="display:flex;gap:6px;border-bottom:1px solid #e3e6eb">
+              <div style="display:flex;gap:6px;border-bottom:1px solid ${TH.border}">
                 ${V.movementTabs.map(t => `
                   <button data-click="${H(() => { set('movement', t.value); render(); })}" style="flex:1;border:0;border-bottom:2.5px solid ${t.underline};background:transparent;color:${t.color};font-weight:${t.weight};padding:10px 4px;cursor:pointer">${t.label}</button>`).join('')}
               </div>
-              <div style="background:#fff;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:6px;align-items:center">
-                <span style="font-size:12px;color:#8b93a1;letter-spacing:0.06em;text-transform:uppercase">${V.movementKind}</span>
+              <div style="background:${TH.surface};border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:6px;align-items:center">
+                <span style="font-size:12px;color:${GREY};letter-spacing:0.06em;text-transform:uppercase">${V.movementKind}</span>
                 <input id="f-amount" value="${esc(V.formAmount)}" placeholder="0,00 €" inputmode="decimal" style="border:0;background:transparent;text-align:center;font-size:30px;font-weight:700;width:100%;font-variant-numeric:tabular-nums;outline:none">
-                <span style="font-size:12.5px;color:#8b93a1">${V.todayLabel}</span>
+                <span style="font-size:12.5px;color:${GREY}">${V.todayLabel}</span>
               </div>
               ${!V.isTransferMovement ? `
                 <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -843,14 +976,14 @@ function renderApp() {
                       <svg width="16" height="16"><use href="${c.icon}"></use></svg>${c.name}
                     </button>`).join('')}
                 </div>` : ''}
-              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#6b7280">Account
-                <select data-change="${H(e => { set('account', +e.target.value); render(); })}" style="border:1px solid #dfe3ea;border-radius:12px;padding:12px 13px;background:#fff;cursor:pointer;font-size:15px">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Account
+                <select data-change="${H(e => { set('account', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
                   ${V.accountOptions.map(o => `<option value="${o.v}" ${o.v === V.formAccount ? 'selected' : ''}>${o.l}</option>`).join('')}
                 </select>
               </label>
               ${V.isTransferMovement ? `
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#6b7280">To account
-                  <select data-change="${H(e => { set('toAccount', +e.target.value); render(); })}" style="border:1px solid #dfe3ea;border-radius:12px;padding:12px 13px;background:#fff;cursor:pointer;font-size:15px">
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">To account
+                  <select data-change="${H(e => { set('toAccount', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
                     ${V.toAccountOptions.map(o => `<option value="${o.v}" ${o.v === V.formToAccount ? 'selected' : ''}>${o.l}</option>`).join('')}
                   </select>
                 </label>` : ''}
@@ -858,88 +991,89 @@ function renderApp() {
 
           ${V.isAccountModal ? `
             <div style="display:flex;flex-direction:column;gap:14px">
-              <div style="background:#fff;border-radius:14px;padding:6px 14px">
+              <div style="background:${TH.surface};border-radius:14px;padding:6px 14px">
                 ${V.accountKinds.map(k => `
                   <button data-click="${H(() => { set('kind', k.value); render(); })}" style="width:100%;border:0;background:transparent;padding:12px 0;display:flex;align-items:center;gap:12px;cursor:pointer;text-align:left">
                     <span style="width:20px;height:20px;border-radius:50%;border:2px solid ${k.ring};display:grid;place-items:center;flex:none">
                       <span style="width:10px;height:10px;border-radius:50%;background:${k.dot}"></span>
                     </span>
                     <span style="flex:1;font-weight:500">${k.label}</span>
-                    <svg width="20" height="20" style="color:#7b8494"><use href="${k.icon}"></use></svg>
+                    <svg width="20" height="20" style="color:${GREY}"><use href="${k.icon}"></use></svg>
                   </button>`).join('')}
               </div>
-              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#6b7280">Name
-                <input id="f-name" value="${esc(V.formName)}" placeholder="e.g. Everyday account" style="border:1px solid #dfe3ea;border-radius:12px;padding:12px 13px;background:#fff;font-size:15px;outline:none">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Name
+                <input id="f-name" value="${esc(V.formName)}" placeholder="e.g. Everyday account" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
               </label>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#6b7280">Type
-                  <select data-change="${H(e => { set('type', e.target.value); render(); })}" style="border:1px solid #dfe3ea;border-radius:12px;padding:12px 13px;background:#fff;cursor:pointer;font-size:15px">
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Type
+                  <select data-change="${H(e => { set('type', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
                     ${['Bank', 'Cash', 'Wallet', 'Card'].map(t => `<option value="${t}" ${t === V.formType ? 'selected' : ''}>${t === 'Wallet' ? 'Digital wallet' : t}</option>`).join('')}
                   </select>
                 </label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#6b7280">Initial balance
-                  <input id="f-balance" value="${esc(V.formBalance)}" placeholder="0,00" inputmode="decimal" style="border:1px solid #dfe3ea;border-radius:12px;padding:12px 13px;background:#fff;font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Initial balance
+                  <input id="f-balance" value="${esc(V.formBalance)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>
               </div>
               ${V.isSavingsKind ? `
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#6b7280">Savings goal
-                  <input id="f-goal" value="${esc(V.formGoal)}" placeholder="10.000" inputmode="decimal" style="border:1px solid #dfe3ea;border-radius:12px;padding:12px 13px;background:#fff;font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Savings goal
+                  <input id="f-goal" value="${esc(V.formGoal)}" placeholder="10.000" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>` : ''}
             </div>` : ''}
 
           ${V.isCatModal ? `
             <div style="display:flex;flex-direction:column;gap:16px">
-              <div style="display:flex;align-items:center;gap:14px;background:#fff;border-radius:14px;padding:14px">
+              <div style="display:flex;align-items:center;gap:14px;background:${TH.surface};border-radius:14px;padding:14px">
                 <span style="width:56px;height:56px;border-radius:50%;background:${V.formColor};color:#fff;display:grid;place-items:center;flex:none"><svg width="28" height="28"><use href="${V.formIconRef}"></use></svg></span>
-                <input id="f-name" value="${esc(V.formName)}" placeholder="Category name" style="flex:1;border:0;border-bottom:1.5px solid #e3e6eb;padding:8px 2px;font-size:17px;font-weight:600;background:transparent;outline:none">
+                <input id="f-name" value="${esc(V.formName)}" placeholder="Category name" style="flex:1;border:0;border-bottom:1.5px solid ${TH.border};padding:8px 2px;font-size:17px;font-weight:600;background:transparent;outline:none">
               </div>
               <div style="display:flex;flex-direction:column;gap:9px">
-                <span style="font-size:12px;font-weight:600;color:#8b93a1;text-transform:uppercase;letter-spacing:0.06em">Icon</span>
-                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:8px;background:#fff;border-radius:14px;padding:12px">
+                <span style="font-size:12px;font-weight:600;color:${GREY};text-transform:uppercase;letter-spacing:0.06em">Icon</span>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:8px;background:${TH.surface};border-radius:14px;padding:12px">
                   ${V.iconChoices.map(i => `
                     <button data-click="${H(() => { set('icon', i.value); render(); })}" style="aspect-ratio:1;border:1.5px solid ${i.border};background:${i.bg};border-radius:50%;cursor:pointer;display:grid;place-items:center;color:${i.fg}"><svg width="21" height="21"><use href="${i.ref}"></use></svg></button>`).join('')}
                 </div>
               </div>
               <div style="display:flex;flex-direction:column;gap:9px">
-                <span style="font-size:12px;font-weight:600;color:#8b93a1;text-transform:uppercase;letter-spacing:0.06em">Colour</span>
-                <div style="display:flex;flex-wrap:wrap;gap:9px;background:#fff;border-radius:14px;padding:12px">
+                <span style="font-size:12px;font-weight:600;color:${GREY};text-transform:uppercase;letter-spacing:0.06em">Colour</span>
+                <div style="display:flex;flex-wrap:wrap;gap:9px;background:${TH.surface};border-radius:14px;padding:12px">
                   ${V.colorChoices.map(c => `
                     <button data-click="${H(() => { set('color', c.value); render(); })}" style="width:32px;height:32px;border-radius:50%;background:${c.value};border:3px solid ${c.ring};cursor:pointer;padding:0"></button>`).join('')}
                 </div>
               </div>
               ${V.canDelete ? `
-                <button data-click="${H(() => deleteCategoryAction())}" style="border:0;background:#fff;color:#d93a34;border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                <button data-click="${H(() => deleteCategoryAction())}" style="border:0;background:${TH.surface};color:#d93a34;border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
                   <svg width="18" height="18"><use href="#ic-trash"></use></svg>Delete category
                 </button>` : ''}
             </div>` : ''}
 
           ${V.isBudgetModal ? `
             <div style="display:flex;flex-direction:column;gap:14px">
-              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#6b7280">Category
-                <select data-change="${H(e => { set('category', +e.target.value); render(); })}" style="border:1px solid #dfe3ea;border-radius:12px;padding:12px 13px;background:#fff;cursor:pointer;font-size:15px">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Category
+                <select data-change="${H(e => { set('category', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
                   ${V.budgetCatOptions.map(o => `<option value="${o.v}" ${o.v === V.formCategory ? 'selected' : ''}>${o.l}</option>`).join('')}
                 </select>
               </label>
-              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#6b7280">Monthly limit
-                <input id="f-limit" value="${esc(V.formLimit)}" placeholder="0" inputmode="decimal" style="border:1px solid #dfe3ea;border-radius:12px;padding:12px 13px;background:#fff;font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Monthly limit
+                <input id="f-limit" value="${esc(V.formLimit)}" placeholder="0" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
               </label>
-              <div style="font-size:13px;color:#7b8494;background:#fff;border-radius:12px;padding:12px 14px">${V.budgetHint}</div>
+              <div style="font-size:13px;color:${GREY};background:${TH.surface};border-radius:12px;padding:12px 14px">${V.budgetHint}</div>
               ${V.canRemoveBudget ? `
-                <button data-click="${H(() => removeBudgetAction())}" style="border:0;background:#fff;color:#d93a34;border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                <button data-click="${H(() => removeBudgetAction())}" style="border:0;background:${TH.surface};color:#d93a34;border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
                   <svg width="18" height="18"><use href="#ic-trash"></use></svg>Remove budget
                 </button>` : ''}
             </div>` : ''}
 
           ${V.isSettingsModal ? `
-            <div style="display:flex;flex-direction:column;gap:2px;background:#fff;border-radius:14px;overflow:hidden">
-              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid #f1f2f5;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:#1b1f26">
-                <svg width="20" height="20" style="color:#3a4150"><use href="#ic-db"></use></svg>Data
+            ${themeSettingsHtml()}
+            <div style="display:flex;flex-direction:column;gap:2px;background:${TH.surface};border-radius:14px;overflow:hidden">
+              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+                <svg width="20" height="20" style="color:${GREY}"><use href="#ic-db"></use></svg>Data
               </button>
-              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid #f1f2f5;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:#1b1f26">
-                <svg width="20" height="20" style="color:#3a4150"><use href="#ic-refresh"></use></svg>Backups
+              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+                <svg width="20" height="20" style="color:${GREY}"><use href="#ic-refresh"></use></svg>Backups
               </button>
-              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid #f1f2f5;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:#1b1f26">
-                <svg width="20" height="20" style="color:#3a4150"><use href="#ic-info"></use></svg>About
+              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+                <svg width="20" height="20" style="color:${GREY}"><use href="#ic-info"></use></svg>About
               </button>
               <button data-click="${H(() => logoutAction())}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${RED}">
                 <svg width="20" height="20"><use href="#ic-close"></use></svg>Log out
@@ -954,8 +1088,8 @@ function renderApp() {
   }
 
   const sidebar = `
-    <aside style="width:230px;flex:none;background:#fff;border-right:1px solid #eceef2;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;display:flex;flex-direction:column">
-      <div style="display:flex;align-items:center;gap:11px;padding:18px 18px 16px;background:${HERO_GRADIENT}">
+    <aside style="width:230px;flex:none;background:${TH.surface};border-right:1px solid ${TH.border};position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:11px;padding:18px 18px 16px;background:${TH.hero}">
         <span style="width:36px;height:36px;border-radius:11px;background:#ffd43b;display:grid;place-items:center;overflow:hidden;flex:none"><img src="cat-logo.png" alt="" style="width:74%;height:74%;object-fit:contain"></span>
         <span style="font-weight:700;font-size:15.5px">MerlitoMoney</span>
       </div>
@@ -965,8 +1099,8 @@ function renderApp() {
             <svg width="19" height="19"><use href="${n.icon}"></use></svg>${n.label}
           </button>`).join('')}
       </nav>
-      <div style="padding:8px 0;border-top:1px solid #eceef2">
-        <button data-click="${H(() => openModal('settings'))}" style="width:100%;border:0;background:transparent;color:#6b7280;font-weight:400;padding:11px 18px;cursor:pointer;display:flex;align-items:center;gap:12px;font-size:14.5px;text-align:left">
+      <div style="padding:8px 0;border-top:1px solid ${TH.border}">
+        <button data-click="${H(() => openModal('settings'))}" style="width:100%;border:0;background:transparent;color:${GREY};font-weight:400;padding:11px 18px;cursor:pointer;display:flex;align-items:center;gap:12px;font-size:14.5px;text-align:left">
           <svg width="19" height="19"><use href="#ic-gear"></use></svg>Settings
         </button>
       </div>
