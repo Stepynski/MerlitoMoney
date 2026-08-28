@@ -3,6 +3,7 @@
 // ---------- constants ----------
 const RED = '#d93a34', GREEN = '#2f9e44', GREY = '#6b7280', BLUE = '#3b5bdb';
 const ACCENT = BLUE;
+const HERO_GRADIENT = 'linear-gradient(135deg,#6ea8fe,#e599f7 55%,#ffc9c9)';
 const PAL = ['#1f6fd0', '#e03b34', '#4caf50', '#f4703a', '#12897f', '#f2a25c', '#7048c8', '#b6d334', '#5b46b8', '#26aee8', '#ef5b8c', '#e8a33d', '#a531b5', '#c0173f', '#8b6ce0'];
 const ICONS = ['ic-cart', 'ic-fork', 'ic-car', 'ic-bag', 'ic-health', 'ic-home', 'ic-play', 'ic-dots', 'ic-salary', 'ic-refresh', 'ic-gift', 'ic-star', 'ic-bank', 'ic-wallet', 'ic-cash', 'ic-piggy', 'ic-transfer', 'ic-receipt'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -413,7 +414,7 @@ function computeView() {
       onClick: () => openModal('budget', null, { category: c.id, limit: String(Math.max(50, Math.round((T.byCat[c.id] || 100) / M / 10) * 10)) })
     })),
     drawerOpen: s.drawerOpen,
-    drawerItems: [{ label: 'Settings', icon: '#ic-gear' }, { label: 'Data', icon: '#ic-db' }, { label: 'About', icon: '#ic-info' }],
+    drawerItems: [{ label: 'Data', icon: '#ic-db' }, { label: 'Backups', icon: '#ic-refresh' }, { label: 'About', icon: '#ic-info' }],
     showModal: !!s.modal, isMovementModal: s.modal === 'movement', isAccountModal: s.modal === 'account',
     isCatModal: s.modal === 'category', isBudgetModal: s.modal === 'budget', isSettingsModal: s.modal === 'settings',
     modalTitle: modalMeta[0], modalCta: modalMeta[1],
@@ -493,7 +494,7 @@ function renderApp() {
   const V = computeView();
 
   const header = `
-  <header style="position:sticky;top:0;z-index:30;background:#fff;box-shadow:0 1px 0 rgba(0,0,0,0.07)">
+  <header style="position:sticky;top:0;z-index:30;background:${HERO_GRADIENT};box-shadow:0 1px 0 rgba(0,0,0,0.07)">
     <div style="display:flex;align-items:center;gap:8px;padding:10px clamp(10px,2.4vw,20px)">
       ${V.isNarrow ? iconBtn(V, 'Menu', 'ic-menu', 22, () => { state.drawerOpen = !state.drawerOpen; render(); }) : '<span style="width:40px;flex:none"></span>'}
       <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0">
@@ -801,7 +802,7 @@ function renderApp() {
   const drawer = !V.drawerOpen ? '' : `
     <div data-click="${H(() => { state.drawerOpen = false; render(); })}" style="position:fixed;inset:0;z-index:60;background:rgba(20,24,32,0.42);animation:kb-in .18s ease both">
       <div data-click="${H(e => e.stopPropagation())}" style="width:min(300px,82vw);height:100%;background:#f7f8fa;display:flex;flex-direction:column;box-shadow:4px 0 24px rgba(16,24,40,0.2)">
-        <div style="background:linear-gradient(135deg,#6ea8fe,#e599f7 55%,#ffc9c9);padding:22px 20px 18px;display:flex;flex-direction:column;gap:10px">
+        <div style="background:${HERO_GRADIENT};padding:22px 20px 18px;display:flex;flex-direction:column;gap:10px">
           <span style="width:56px;height:56px;border-radius:18px;background:#ffd43b;display:grid;place-items:center;overflow:hidden"><img src="cat-logo.png" alt="MerlitoMoney" style="width:74%;height:74%;object-fit:contain"></span>
           <span style="font-weight:700;font-size:19px">MerlitoMoney</span>
         </div>
@@ -954,7 +955,7 @@ function renderApp() {
 
   const sidebar = `
     <aside style="width:230px;flex:none;background:#fff;border-right:1px solid #eceef2;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;display:flex;flex-direction:column">
-      <div style="display:flex;align-items:center;gap:11px;padding:18px 18px 16px;border-bottom:1px solid #eceef2">
+      <div style="display:flex;align-items:center;gap:11px;padding:18px 18px 16px;background:${HERO_GRADIENT}">
         <span style="width:36px;height:36px;border-radius:11px;background:#ffd43b;display:grid;place-items:center;overflow:hidden;flex:none"><img src="cat-logo.png" alt="" style="width:74%;height:74%;object-fit:contain"></span>
         <span style="font-weight:700;font-size:15.5px">MerlitoMoney</span>
       </div>
