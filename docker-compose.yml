@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    container_name: merlitomoney-v2
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      MERLITOMONEY_PASSWORD: ${MERLITOMONEY_PASSWORD}
+    volumes:
+      - ./data:/app/data
