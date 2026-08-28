@@ -123,7 +123,7 @@ function saveThemePref(key, value) {
 const state = {
   authed: false, loginError: '',
   accounts: [], cats: [], tx: [], budgets: {},
-  page: 'accounts', mode: 'month', anchor: new Date(), view: 'expenses',
+  page: 'overview', mode: 'month', anchor: new Date(), view: 'expenses',
   fAccounts: [], fTypes: [], fCats: [], filtersOpen: false, expanded: null,
   narrow: window.matchMedia('(max-width: 859px)').matches,
   drawerOpen: false, modal: null, editId: null,
@@ -196,6 +196,24 @@ function totals() {
   return { rows, byCat, counts, exp, inc };
 }
 function unbudgeted() { return state.cats.filter(c => c.kind === 'expense' && state.budgets[c.id] === undefined); }
+function netWorthHistory(monthsBack) {
+  const s = state;
+  const sorted = s.tx.slice().sort((a, b) => a._date - b._date);
+  const now = new Date();
+  let idx = 0, running = s.accounts.reduce((a, acc) => a + acc.starting_balance, 0);
+  const points = [];
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    const boundary = i === 0 ? now : new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+    while (idx < sorted.length && sorted[idx]._date <= boundary) {
+      const t = sorted[idx];
+      running += t.type === 'Income' ? t.amount : t.type === 'Transfer internal' ? 0 : -t.amount;
+      idx++;
+    }
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    points.push({ label: M3[d.getMonth()], value: running });
+  }
+  return points;
+}
 function toggle(key, id) {
   const arr = state[key];
   state[key] = arr.indexOf(id) < 0 ? arr.concat([id]) : arr.filter(x => x !== id);
@@ -315,7 +333,7 @@ function computeView() {
   const saldo = T.inc - T.exp;
   const expView = s.view === 'expenses';
 
-  const nav = [['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['overview', 'Overview', 'ic-bars'], ['budget', 'Budget', 'ic-gauge']];
+  const nav = [['overview', 'Overview', 'ic-bars'], ['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['budget', 'Budget', 'ic-gauge']];
 
   let cells;
   if (s.page === 'accounts') {
@@ -498,6 +516,27 @@ function computeView() {
   const gPct = gLim ? gSp / gLim * 100 : 0;
   const gOver = gPct > 100;
 
+  const nwPoints = netWorthHistory(6);
+  const nwVals = nwPoints.map(p => p.value);
+  const nwMin = Math.min(...nwVals), nwMax = Math.max(...nwVals), nwFlat = nwMax === nwMin;
+  const nwPad = 4, nwH = 34, nwInner = nwH - nwPad * 2;
+  const nwCoords = nwPoints.map((p, i) => {
+    const x = nwPoints.length > 1 ? i / (nwPoints.length - 1) * 100 : 50;
+    const y = nwPad + (nwFlat ? nwInner / 2 : nwInner - (p.value - nwMin) / (nwMax - nwMin) * nwInner);
+    return { x, y };
+  });
+  const nwPath = nwCoords.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(2) + ',' + p.y.toFixed(2)).join(' ');
+  const nwDelta = nwVals[nwVals.length - 1] - nwVals[0];
+  const netWorthTrend = {
+    current: money(nwVals[nwVals.length - 1]),
+    changeLabel: money(nwDelta, true) + ' · 6mo',
+    changeColor: nwDelta < 0 ? RED : GREEN,
+    path: nwPath, area: nwPath + ` L100,${nwH} L0,${nwH} Z`,
+    labels: nwPoints.map(p => p.label)
+  };
+  const dashboardAccounts = accountGroups.flatMap(g => g.items);
+  const budgetWatch = budgetRows.slice(0, 3).map(b => Object.assign({}, b, { onClick: () => { s.page = 'budget'; render(); } }));
+
   const modalMeta = {
     movement: ['New movement', 'Save'], account: ['New account', 'Save'],
     category: [s.editId ? 'Edit category' : 'New category', 'Apply'],
@@ -531,6 +570,7 @@ function computeView() {
     dayGroups, noRows: rows.length === 0,
     movementSummary: rows.length + ' movements · net ' + money(rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0), true),
     axis, bars, barGap: bars.length > 20 ? '2px' : bars.length > 10 ? '5px' : '12px', averages, ranking,
+    netWorthTrend, dashboardAccounts, budgetWatch,
     globalBg: gOver ? '#fdecea' : TH.surface, globalTrack: gOver ? '#f6cfcb' : TH.border,
     globalColor: gOver ? RED : ACCENT, globalPct: Math.round(gPct) + '%',
     globalWidth: Math.min(100, gPct) + '%', globalSpent: money(gSp), globalLimit: money(gLim),
@@ -794,6 +834,49 @@ function renderApp() {
 
   const overviewPage = !V.isOverview ? '' : `
     <div style="display:flex;flex-direction:column;gap:14px;animation:kb-up .25s ease both">
+      <section style="background:${TH.surface};border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font-weight:700;font-size:15px">Net worth</span>
+          <span style="font-weight:600;color:${V.netWorthTrend.changeColor};font-size:13px">${V.netWorthTrend.changeLabel}</span>
+        </div>
+        <span style="font-size:25px;font-weight:700;font-variant-numeric:tabular-nums">${V.netWorthTrend.current}</span>
+        <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:70px;display:block">
+          <path d="${V.netWorthTrend.area}" fill="${ACCENT}22" stroke="none"></path>
+          <path d="${V.netWorthTrend.path}" fill="none" stroke="${ACCENT}" stroke-width="1.6" vector-effect="non-scaling-stroke"></path>
+        </svg>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:${TH.textFaint}">
+          ${V.netWorthTrend.labels.map(l => `<span>${l}</span>`).join('')}
+        </div>
+      </section>
+      ${V.dashboardAccounts.length ? `
+      <section style="display:flex;flex-direction:column;gap:8px">
+        <span style="font-weight:700;font-size:15px;padding:0 4px">Accounts</span>
+        <div style="display:flex;gap:10px;overflow-x:auto;padding:2px 4px 6px">
+          ${V.dashboardAccounts.map(a => `
+            <button data-click="${H(a.onClick)}" style="flex:none;min-width:128px;background:${TH.surface};border:0;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,0.06);text-align:left">
+              <span style="width:32px;height:32px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center"><svg width="16" height="16"><use href="${a.icon}"></use></svg></span>
+              <span style="font-size:12.5px;color:${GREY};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.name}</span>
+              <span style="font-weight:600;font-variant-numeric:tabular-nums;font-size:14px">${a.balance}</span>
+            </button>`).join('')}
+        </div>
+      </section>` : ''}
+      ${V.budgetWatch.length ? `
+      <section style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:0 4px">
+          <span style="font-weight:700;font-size:15px">Budgets to watch</span>
+          <button data-click="${H(() => { state.page = 'budget'; render(); })}" style="border:0;background:transparent;color:${ACCENT};font-weight:600;cursor:pointer;font-size:13px;padding:0">See all</button>
+        </div>
+        <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+          ${V.budgetWatch.map(b => `
+            <button data-click="${H(b.onClick)}" style="width:100%;text-align:left;border:0;background:${TH.surface};padding:12px 16px;border-bottom:1px solid ${TH.border};display:flex;align-items:center;gap:12px;cursor:pointer">
+              <span style="width:34px;height:34px;border-radius:50%;background:${b.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="16" height="16"><use href="${b.icon}"></use></svg></span>
+              <span style="flex:1;display:flex;flex-direction:column;gap:5px;min-width:0">
+                <span style="display:flex;justify-content:space-between;font-size:13.5px;font-weight:600"><span>${b.name}</span><span style="color:${b.barColor}">${b.pct}</span></span>
+                <span style="height:6px;border-radius:3px;background:${TH.border};overflow:hidden;display:block"><span style="display:block;height:100%;width:${b.width};background:${b.barColor}"></span></span>
+              </span>
+            </button>`).join('')}
+        </div>
+      </section>` : ''}
       <section style="background:${TH.surface};border-radius:16px;padding:16px 16px 12px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
         <div style="display:grid;grid-template-columns:46px 1fr;gap:6px">
           <div style="display:flex;flex-direction:column;justify-content:space-between;height:210px;font-size:11px;color:${TH.textFaint};text-align:right;font-variant-numeric:tabular-nums;padding-right:4px">
