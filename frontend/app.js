@@ -149,6 +149,12 @@ async function removeBudgetAction() {
   await loadAll();
   render();
 }
+async function logoutAction() {
+  await api('/api/logout', { method: 'POST' });
+  state.authed = false;
+  state.modal = null; state.drawerOpen = false;
+  render();
+}
 
 // ---------- event delegation ----------
 let handlers = [];
@@ -367,7 +373,8 @@ function computeView() {
   const modalMeta = {
     movement: ['New movement', 'Save'], account: ['New account', 'Save'],
     category: [s.editId ? 'Edit category' : 'New category', 'Apply'],
-    budget: [s.editId ? 'Edit budget' : 'Set budget', 'Save']
+    budget: [s.editId ? 'Edit budget' : 'Set budget', 'Save'],
+    settings: ['Settings', '']
   }[s.modal] || ['', ''];
 
   return {
@@ -408,7 +415,7 @@ function computeView() {
     drawerOpen: s.drawerOpen,
     drawerItems: [{ label: 'Settings', icon: '#ic-gear' }, { label: 'Data', icon: '#ic-db' }, { label: 'About', icon: '#ic-info' }],
     showModal: !!s.modal, isMovementModal: s.modal === 'movement', isAccountModal: s.modal === 'account',
-    isCatModal: s.modal === 'category', isBudgetModal: s.modal === 'budget',
+    isCatModal: s.modal === 'category', isBudgetModal: s.modal === 'budget', isSettingsModal: s.modal === 'settings',
     modalTitle: modalMeta[0], modalCta: modalMeta[1],
     movementTabs: [['Expense', 'Expenses'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
       const on = s.form.movement === t[0];
@@ -488,7 +495,7 @@ function renderApp() {
   const header = `
   <header style="position:sticky;top:0;z-index:30;background:#fff;box-shadow:0 1px 0 rgba(0,0,0,0.07)">
     <div style="display:flex;align-items:center;gap:8px;padding:10px clamp(10px,2.4vw,20px)">
-      ${iconBtn(V, 'Menu', 'ic-menu', 22, () => { state.drawerOpen = !state.drawerOpen; render(); })}
+      ${V.isNarrow ? iconBtn(V, 'Menu', 'ic-menu', 22, () => { state.drawerOpen = !state.drawerOpen; render(); }) : '<span style="width:40px;flex:none"></span>'}
       <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0">
         <span style="font-size:12px;color:#6b7280">Accounts balance</span>
         <span style="font-size:clamp(20px,3.4vw,26px);font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.01em">${V.spendableBalance}</span>
@@ -802,7 +809,7 @@ function renderApp() {
           <button data-click="${H(() => { state.drawerOpen = false; render(); })}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px">
             <svg width="21" height="21" style="color:#3a4150"><use href="${d.icon}"></use></svg>${d.label}
           </button>`).join('')}
-        <button data-click="${H(async () => { await api('/api/logout', { method: 'POST' }); state.authed = false; render(); })}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${RED};margin-top:auto">
+        <button data-click="${H(() => logoutAction())}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${RED};margin-top:auto">
           <svg width="21" height="21"><use href="#ic-close"></use></svg>Log out
         </button>
       </div>
@@ -814,7 +821,7 @@ function renderApp() {
         <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:#f7f8fa;z-index:2">
           <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
           <span style="font-size:19px;font-weight:700;flex:1">${V.modalTitle}</span>
-          <button data-click="${H(() => submit())}" style="border:0;background:#e7ebfd;color:#3b5bdb;border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>
+          ${V.isSettingsModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:#e7ebfd;color:#3b5bdb;border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
         </div>
         <div style="padding:0 18px 20px;display:flex;flex-direction:column;gap:14px">
           ${V.isMovementModal ? `
@@ -921,6 +928,22 @@ function renderApp() {
                   <svg width="18" height="18"><use href="#ic-trash"></use></svg>Remove budget
                 </button>` : ''}
             </div>` : ''}
+
+          ${V.isSettingsModal ? `
+            <div style="display:flex;flex-direction:column;gap:2px;background:#fff;border-radius:14px;overflow:hidden">
+              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid #f1f2f5;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:#1b1f26">
+                <svg width="20" height="20" style="color:#3a4150"><use href="#ic-db"></use></svg>Data
+              </button>
+              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid #f1f2f5;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:#1b1f26">
+                <svg width="20" height="20" style="color:#3a4150"><use href="#ic-refresh"></use></svg>Backups
+              </button>
+              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid #f1f2f5;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:#1b1f26">
+                <svg width="20" height="20" style="color:#3a4150"><use href="#ic-info"></use></svg>About
+              </button>
+              <button data-click="${H(() => logoutAction())}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${RED}">
+                <svg width="20" height="20"><use href="#ic-close"></use></svg>Log out
+              </button>
+            </div>` : ''}
         </div>
       </div>
     </div>`;
@@ -935,15 +958,20 @@ function renderApp() {
         <span style="width:36px;height:36px;border-radius:11px;background:#ffd43b;display:grid;place-items:center;overflow:hidden;flex:none"><img src="cat-logo.png" alt="" style="width:74%;height:74%;object-fit:contain"></span>
         <span style="font-weight:700;font-size:15.5px">MerlitoMoney</span>
       </div>
-      <nav style="display:flex;flex-direction:column;padding:10px 0;gap:1px">
+      <nav style="display:flex;flex-direction:column;padding:10px 0;gap:1px;flex:1">
         ${V.navItems.map(n => `
           <button data-click="${H(n.onClick)}" style="border:0;border-left:3px solid ${n.pill !== 'transparent' ? ACCENT : 'transparent'};background:${n.pill};color:${n.color};font-weight:${n.weight};padding:11px 18px;cursor:pointer;display:flex;align-items:center;gap:12px;font-size:14.5px;text-align:left">
             <svg width="19" height="19"><use href="${n.icon}"></use></svg>${n.label}
           </button>`).join('')}
       </nav>
+      <div style="padding:8px 0;border-top:1px solid #eceef2">
+        <button data-click="${H(() => openModal('settings'))}" style="width:100%;border:0;background:transparent;color:#6b7280;font-weight:400;padding:11px 18px;cursor:pointer;display:flex;align-items:center;gap:12px;font-size:14.5px;text-align:left">
+          <svg width="19" height="19"><use href="#ic-gear"></use></svg>Settings
+        </button>
+      </div>
     </aside>`;
 
-  return `<div style="min-height:100vh;display:flex;font-size:15px">${sidebar}<div style="flex:1;min-width:0;display:flex;flex-direction:column">${header}${main}</div>${drawer}${modal}</div>`;
+  return `<div style="min-height:100vh;display:flex;font-size:15px">${sidebar}<div style="flex:1;min-width:0;display:flex;flex-direction:column">${header}${main}</div>${modal}</div>`;
 }
 
 // ---------- bootstrap ----------
