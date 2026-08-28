@@ -514,14 +514,6 @@ function renderApp() {
       <button data-click="${H(() => { shiftPeriod(1); render(); })}" aria-label="Next period" style="border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:#3b5bdb;flex:none"><svg width="20" height="20"><use href="#ic-right"></use></svg></button>
     </div>
 
-    ${V.isWide ? `
-    <nav style="display:flex;justify-content:center;gap:4px;padding:0 20px;border-top:1px solid #eceef2">
-      ${V.navItems.map(n => `
-        <button data-click="${H(n.onClick)}" style="border:0;border-bottom:2.5px solid ${n.underline};background:transparent;color:${n.color};font-weight:${n.weight};padding:12px 20px 10px;cursor:pointer;display:flex;align-items:center;gap:9px;font-size:14px">
-          <svg width="19" height="19"><use href="${n.icon}"></use></svg>${n.label}
-        </button>`).join('')}
-    </nav>` : ''}
-
     <div style="display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid #eceef2;background:#f7f8fa">
       ${V.summaryCells.map(c => `
         <button data-click="${H(c.onClick)}" style="border:0;border-bottom:3px solid ${c.underline};background:transparent;padding:10px 6px 9px;cursor:${c.cursor};display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0">
@@ -933,7 +925,25 @@ function renderApp() {
       </div>
     </div>`;
 
-  return `<div style="min-height:100vh;display:flex;flex-direction:column;font-size:15px">${header}${main}${bottomNav}${drawer}${modal}</div>`;
+  if (V.isNarrow) {
+    return `<div style="min-height:100vh;display:flex;flex-direction:column;font-size:15px">${header}${main}${bottomNav}${drawer}${modal}</div>`;
+  }
+
+  const sidebar = `
+    <aside style="width:230px;flex:none;background:#fff;border-right:1px solid #eceef2;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:11px;padding:18px 18px 16px;border-bottom:1px solid #eceef2">
+        <span style="width:36px;height:36px;border-radius:11px;background:#ffd43b;display:grid;place-items:center;overflow:hidden;flex:none"><img src="cat-logo.png" alt="" style="width:74%;height:74%;object-fit:contain"></span>
+        <span style="font-weight:700;font-size:15.5px">MerlitoMoney</span>
+      </div>
+      <nav style="display:flex;flex-direction:column;padding:10px 0;gap:1px">
+        ${V.navItems.map(n => `
+          <button data-click="${H(n.onClick)}" style="border:0;border-left:3px solid ${n.pill !== 'transparent' ? ACCENT : 'transparent'};background:${n.pill};color:${n.color};font-weight:${n.weight};padding:11px 18px;cursor:pointer;display:flex;align-items:center;gap:12px;font-size:14.5px;text-align:left">
+            <svg width="19" height="19"><use href="${n.icon}"></use></svg>${n.label}
+          </button>`).join('')}
+      </nav>
+    </aside>`;
+
+  return `<div style="min-height:100vh;display:flex;font-size:15px">${sidebar}<div style="flex:1;min-width:0;display:flex;flex-direction:column">${header}${main}</div>${drawer}${modal}</div>`;
 }
 
 // ---------- bootstrap ----------
