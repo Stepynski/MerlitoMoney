@@ -91,6 +91,7 @@ function toggle(key, id) {
 function openModal(kind, editId, form) {
   state.modal = kind; state.editId = editId || null; state.drawerOpen = false;
   state.form = Object.assign({ name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense' }, form || {});
+  render();
 }
 
 // ---------- mutations (call the API, then reload + render) ----------
