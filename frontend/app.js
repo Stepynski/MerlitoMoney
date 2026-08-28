@@ -124,7 +124,7 @@ const state = {
   authed: false, loginError: '',
   accounts: [], cats: [], tx: [], budgets: {},
   page: 'overview', mode: 'month', anchor: new Date(), view: 'expenses',
-  fAccounts: [], fTypes: [], fCats: [], filtersOpen: false, expanded: null,
+  fAccounts: [], fTypes: [], fCats: [], filtersOpen: false,
   narrow: window.matchMedia('(max-width: 859px)').matches,
   drawerOpen: false, modal: null, editId: null,
   themeStyle: loadThemePref('mm_theme_style', 'colorful'),
@@ -164,8 +164,7 @@ function cat(id) { return state.cats.find(c => c.id === id); }
 function acct(id) { return state.accounts.find(a => a.id === id); }
 function set(k, v) { state.form[k] = v; }
 
-function period() {
-  const a = state.anchor;
+function periodFor(a) {
   if (state.mode === 'week') {
     const start = new Date(a); start.setDate(a.getDate() - ((a.getDay() + 6) % 7));
     const end = new Date(start); end.setDate(start.getDate() + 6);
@@ -175,14 +174,16 @@ function period() {
   if (state.mode === 'quarter') { const q = Math.floor(a.getMonth() / 3) * 3; return { start: new Date(a.getFullYear(), q, 1), end: new Date(a.getFullYear(), q + 3, 0), title: 'Q' + (q / 3 + 1) + ' ' + a.getFullYear() }; }
   return { start: new Date(a.getFullYear(), 0, 1), end: new Date(a.getFullYear(), 11, 31), title: 'YEAR ' + a.getFullYear() };
 }
-function shiftPeriod(dir) {
+function period() { return periodFor(state.anchor); }
+function shiftedAnchor(dir) {
   const a = new Date(state.anchor);
   if (state.mode === 'week') a.setDate(a.getDate() + 7 * dir);
   else if (state.mode === 'month') a.setMonth(a.getMonth() + dir);
   else if (state.mode === 'quarter') a.setMonth(a.getMonth() + 3 * dir);
   else a.setFullYear(a.getFullYear() + dir);
-  state.anchor = a;
+  return a;
 }
+function shiftPeriod(dir) { state.anchor = shiftedAnchor(dir); }
 function months() { const p = period(); return Math.max(1, Math.round((p.end - p.start) / 86400000 / 30.4)); }
 function scoped() { const p = period(); return state.tx.filter(t => t._date >= p.start && t._date <= p.end); }
 function totals() {
@@ -477,28 +478,6 @@ function computeView() {
     })
   }));
   const spanDays = Math.max(1, Math.round((Math.min(P.end, new Date()) - P.start) / 86400000) + 1);
-  const chartTotal = chartTx.reduce((a, t) => a + t.amount, 0);
-  const avgColor = expView ? RED : GREEN;
-  const averages = [
-    { label: 'Day (avg)', value: money(chartTotal / spanDays), color: avgColor },
-    { label: 'Week (avg)', value: money(chartTotal / spanDays * 7), color: avgColor },
-    { label: 'Month (avg)', value: money(chartTotal / spanDays * 30.4), color: avgColor }
-  ];
-  const ranking = s.cats.filter(c => c.kind === (expView ? 'expense' : 'income'))
-    .map(c => ({ c, v: T.byCat[c.id] || 0 })).filter(x => x.v > 0).sort((a, b) => b.v - a.v)
-    .map(x => {
-      const open = s.expanded === x.c.id;
-      const detail = T.rows.filter(t => t.category_id === x.c.id).slice(0, 5).map(t => ({
-        left: dm(t._date).slice(0, 5) + ' · ' + (acct(t.account_id) || {}).name, right: money(t.amount)
-      }));
-      return {
-        name: x.c.name, count: '(' + (T.counts[x.c.id] || 0) + ')', color: x.c.color, icon: '#' + x.c.icon,
-        amount: money(x.v), amountColor: expView ? RED : GREEN,
-        pct: Math.round(x.v / (chartTotal || 1) * 100) + '%', width: (x.v / (chartTotal || 1) * 100) + '%',
-        chevron: open ? '#ic-up' : '#ic-down', open, detail,
-        onClick: () => { s.expanded = open ? null : x.c.id; render(); }
-      };
-    });
 
   const bIds = Object.keys(s.budgets).map(Number).filter(id => cat(id));
   const budgetRows = bIds.map(id => {
@@ -537,6 +516,43 @@ function computeView() {
   const dashboardAccounts = accountGroups.flatMap(g => g.items);
   const budgetWatch = budgetRows.slice(0, 3).map(b => Object.assign({}, b, { onClick: () => { s.page = 'budget'; render(); } }));
 
+  const topCatsFor = (kind, n) => {
+    const base = kind === 'income' ? T.inc : T.exp;
+    return s.cats.filter(c => c.kind === kind)
+      .map(c => ({ c, v: T.byCat[c.id] || 0 })).filter(x => x.v > 0).sort((a, b) => b.v - a.v).slice(0, n)
+      .map(x => ({
+        name: x.c.name, color: x.c.color, icon: '#' + x.c.icon, amount: money(x.v),
+        pct: Math.round(x.v / (base || 1) * 100) + '%', width: Math.min(100, x.v / (base || 1) * 100) + '%'
+      }));
+  };
+  const topExpenseCats = topCatsFor('expense', 5);
+  const topIncomeCats = topCatsFor('income', 5);
+
+  const prevP = periodFor(shiftedAnchor(-1));
+  const prevExp = s.tx.filter(t => t._date >= prevP.start && t._date <= prevP.end && t.type === 'Expense').reduce((a, t) => a + t.amount, 0);
+  const trendPct = prevExp > 0 ? ((T.exp - prevExp) / prevExp * 100) : (T.exp > 0 ? 100 : 0);
+  const expenseDays = new Set(T.rows.filter(t => t.type === 'Expense').map(t => t._date.toDateString()));
+  let noSpendDays = 0;
+  for (let d = new Date(P.start), end = new Date(Math.min(P.end, new Date())); d <= end; d.setDate(d.getDate() + 1)) {
+    if (!expenseDays.has(d.toDateString())) noSpendDays++;
+  }
+  const insight = {
+    avgDaily: money(T.exp / spanDays),
+    noSpendDays,
+    trendLabel: (trendPct >= 0 ? '+' : '') + Math.round(trendPct) + '% vs previous period',
+    trendColor: trendPct > 0 ? RED : trendPct < 0 ? GREEN : GREY
+  };
+
+  const recentTx = s.tx.slice(0, 5).map(t => {
+    const c = cat(t.category_id), a = acct(t.account_id), isExp = t.type === 'Expense', isInc = t.type === 'Income';
+    return {
+      title: c ? c.name : (t.type === 'Transfer internal' ? 'Internal transfer' : 'External transfer'),
+      icon: '#' + (c ? c.icon : 'ic-transfer'), color: c ? c.color : GREY,
+      account: a ? a.name : '—', date: dm(t._date).slice(0, 5),
+      amount: money(isExp ? -t.amount : t.amount, isInc), amountColor: isExp ? RED : isInc ? GREEN : GREY
+    };
+  });
+
   const modalMeta = {
     movement: ['New movement', 'Save'], account: ['New account', 'Save'],
     category: [s.editId ? 'Edit category' : 'New category', 'Apply'],
@@ -553,7 +569,7 @@ function computeView() {
     navItems: nav.map(p => {
       const on = s.page === p[0];
       return {
-        label: p[1], icon: '#' + p[2], onClick: () => { s.page = p[0]; s.expanded = null; render(); },
+        label: p[1], icon: '#' + p[2], onClick: () => { s.page = p[0]; render(); },
         color: on ? ACCENT : GREY, weight: on ? '600' : '400',
         underline: on ? ACCENT : 'transparent', pill: on ? TH.accentSoft : 'transparent'
       };
@@ -569,8 +585,8 @@ function computeView() {
     filterBorder: fCount ? ACCENT : TH.border, filterColor: fCount ? ACCENT : GREY,
     dayGroups, noRows: rows.length === 0,
     movementSummary: rows.length + ' movements · net ' + money(rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0), true),
-    axis, bars, barGap: bars.length > 20 ? '2px' : bars.length > 10 ? '5px' : '12px', averages, ranking,
-    netWorthTrend, dashboardAccounts, budgetWatch,
+    axis, bars, barGap: bars.length > 20 ? '2px' : bars.length > 10 ? '5px' : '12px',
+    netWorthTrend, dashboardAccounts, budgetWatch, topExpenseCats, topIncomeCats, insight, recentTx,
     globalBg: gOver ? '#fdecea' : TH.surface, globalTrack: gOver ? '#f6cfcb' : TH.border,
     globalColor: gOver ? RED : ACCENT, globalPct: Math.round(gPct) + '%',
     globalWidth: Math.min(100, gPct) + '%', globalSpent: money(gSp), globalLimit: money(gLim),
@@ -832,51 +848,51 @@ function renderApp() {
       </section>
     </div>`;
 
+  const catMiniList = items => items.map(c => `
+    <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid ${TH.border}">
+      <span style="width:34px;height:34px;border-radius:50%;background:${c.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="16" height="16"><use href="${c.icon}"></use></svg></span>
+      <span style="flex:1;display:flex;flex-direction:column;gap:5px;min-width:0">
+        <span style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px;font-weight:600"><span>${c.name}</span><span style="font-variant-numeric:tabular-nums">${c.amount}</span></span>
+        <span style="display:flex;align-items:center;gap:8px">
+          <span style="height:6px;flex:1;border-radius:3px;background:${TH.border};overflow:hidden;display:block"><span style="display:block;height:100%;width:${c.width};background:${c.color}"></span></span>
+          <span style="font-size:11.5px;color:${TH.textFaint};width:32px;text-align:right">${c.pct}</span>
+        </span>
+      </span>
+    </div>`).join('');
+
   const overviewPage = !V.isOverview ? '' : `
     <div style="display:flex;flex-direction:column;gap:14px;animation:kb-up .25s ease both">
-      <section style="background:${TH.surface};border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:8px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline">
-          <span style="font-weight:700;font-size:15px">Net worth</span>
-          <span style="font-weight:600;color:${V.netWorthTrend.changeColor};font-size:13px">${V.netWorthTrend.changeLabel}</span>
+      <div class="mm-dash-hero">
+        <section style="background:${TH.surface};border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <span style="font-weight:700;font-size:15px">Net worth</span>
+            <span style="font-weight:600;color:${V.netWorthTrend.changeColor};font-size:13px">${V.netWorthTrend.changeLabel}</span>
+          </div>
+          <span style="font-size:25px;font-weight:700;font-variant-numeric:tabular-nums">${V.netWorthTrend.current}</span>
+          <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:70px;display:block">
+            <path d="${V.netWorthTrend.area}" fill="${ACCENT}22" stroke="none"></path>
+            <path d="${V.netWorthTrend.path}" fill="none" stroke="${ACCENT}" stroke-width="1.6" vector-effect="non-scaling-stroke"></path>
+          </svg>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:${TH.textFaint}">
+            ${V.netWorthTrend.labels.map(l => `<span>${l}</span>`).join('')}
+          </div>
+        </section>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="flex:1;background:${TH.surface};border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;justify-content:center;gap:3px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+            <span style="font-size:11.5px;color:${GREY}">Daily avg spend</span>
+            <span style="font-weight:700;font-variant-numeric:tabular-nums;font-size:16px;color:${RED}">${V.insight.avgDaily}</span>
+          </div>
+          <div style="flex:1;background:${TH.surface};border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;justify-content:center;gap:3px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+            <span style="font-size:11.5px;color:${GREY}">No-spend days</span>
+            <span style="font-weight:700;font-variant-numeric:tabular-nums;font-size:16px">${V.insight.noSpendDays}</span>
+          </div>
+          <div style="flex:1;background:${TH.surface};border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;justify-content:center;gap:3px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+            <span style="font-size:11.5px;color:${GREY}">Trend</span>
+            <span style="font-weight:700;font-variant-numeric:tabular-nums;font-size:16px;color:${V.insight.trendColor}">${V.insight.trendLabel}</span>
+          </div>
         </div>
-        <span style="font-size:25px;font-weight:700;font-variant-numeric:tabular-nums">${V.netWorthTrend.current}</span>
-        <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:70px;display:block">
-          <path d="${V.netWorthTrend.area}" fill="${ACCENT}22" stroke="none"></path>
-          <path d="${V.netWorthTrend.path}" fill="none" stroke="${ACCENT}" stroke-width="1.6" vector-effect="non-scaling-stroke"></path>
-        </svg>
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:${TH.textFaint}">
-          ${V.netWorthTrend.labels.map(l => `<span>${l}</span>`).join('')}
-        </div>
-      </section>
-      ${V.dashboardAccounts.length ? `
-      <section style="display:flex;flex-direction:column;gap:8px">
-        <span style="font-weight:700;font-size:15px;padding:0 4px">Accounts</span>
-        <div style="display:flex;gap:10px;overflow-x:auto;padding:2px 4px 6px">
-          ${V.dashboardAccounts.map(a => `
-            <button data-click="${H(a.onClick)}" style="flex:none;min-width:128px;background:${TH.surface};border:0;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,0.06);text-align:left">
-              <span style="width:32px;height:32px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center"><svg width="16" height="16"><use href="${a.icon}"></use></svg></span>
-              <span style="font-size:12.5px;color:${GREY};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.name}</span>
-              <span style="font-weight:600;font-variant-numeric:tabular-nums;font-size:14px">${a.balance}</span>
-            </button>`).join('')}
-        </div>
-      </section>` : ''}
-      ${V.budgetWatch.length ? `
-      <section style="display:flex;flex-direction:column;gap:8px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:0 4px">
-          <span style="font-weight:700;font-size:15px">Budgets to watch</span>
-          <button data-click="${H(() => { state.page = 'budget'; render(); })}" style="border:0;background:transparent;color:${ACCENT};font-weight:600;cursor:pointer;font-size:13px;padding:0">See all</button>
-        </div>
-        <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
-          ${V.budgetWatch.map(b => `
-            <button data-click="${H(b.onClick)}" style="width:100%;text-align:left;border:0;background:${TH.surface};padding:12px 16px;border-bottom:1px solid ${TH.border};display:flex;align-items:center;gap:12px;cursor:pointer">
-              <span style="width:34px;height:34px;border-radius:50%;background:${b.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="16" height="16"><use href="${b.icon}"></use></svg></span>
-              <span style="flex:1;display:flex;flex-direction:column;gap:5px;min-width:0">
-                <span style="display:flex;justify-content:space-between;font-size:13.5px;font-weight:600"><span>${b.name}</span><span style="color:${b.barColor}">${b.pct}</span></span>
-                <span style="height:6px;border-radius:3px;background:${TH.border};overflow:hidden;display:block"><span style="display:block;height:100%;width:${b.width};background:${b.barColor}"></span></span>
-              </span>
-            </button>`).join('')}
-        </div>
-      </section>` : ''}
+      </div>
+
       <section style="background:${TH.surface};border-radius:16px;padding:16px 16px 12px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
         <div style="display:grid;grid-template-columns:46px 1fr;gap:6px">
           <div style="display:flex;flex-direction:column;justify-content:space-between;height:210px;font-size:11px;color:${TH.textFaint};text-align:right;font-variant-numeric:tabular-nums;padding-right:4px">
@@ -900,42 +916,78 @@ function renderApp() {
             ${V.bars.map(b => `<span style="flex:1;text-align:center;font-size:10.5px;color:${TH.textFaint};font-variant-numeric:tabular-nums;overflow:hidden">${b.label}</span>`).join('')}
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px">
-          ${V.averages.map(a => `
-            <div style="background:#f4f5f8;border-radius:11px;padding:10px 8px;display:flex;flex-direction:column;align-items:center;gap:2px">
-              <span style="font-size:12px;color:${GREY}">${a.label}</span>
-              <span style="font-weight:600;color:${a.color};font-variant-numeric:tabular-nums;font-size:14.5px">${a.value}</span>
-            </div>`).join('')}
-        </div>
       </section>
-      <section style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
-        ${V.ranking.map(r => `
-          <div style="border-bottom:1px solid ${TH.border}">
-            <button data-click="${H(r.onClick)}" style="width:100%;text-align:left;border:0;background:${TH.surface};padding:12px 16px;display:flex;align-items:center;gap:13px;cursor:pointer">
-              <span style="width:40px;height:40px;border-radius:50%;background:${r.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="20" height="20"><use href="${r.icon}"></use></svg></span>
+
+      <div class="mm-dash-split">
+        <section style="display:flex;flex-direction:column;gap:8px">
+          <span style="font-weight:700;font-size:15px;padding:0 4px">Top expense categories</span>
+          <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+            ${V.topExpenseCats.length ? catMiniList(V.topExpenseCats) : `<div style="padding:24px 16px;text-align:center;color:${GREY};font-size:13.5px">No expenses yet.</div>`}
+          </div>
+        </section>
+        <section style="display:flex;flex-direction:column;gap:8px">
+          <span style="font-weight:700;font-size:15px;padding:0 4px">Top income categories</span>
+          <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+            ${V.topIncomeCats.length ? catMiniList(V.topIncomeCats) : `<div style="padding:24px 16px;text-align:center;color:${GREY};font-size:13.5px">No income yet.</div>`}
+          </div>
+        </section>
+      </div>
+
+      ${V.dashboardAccounts.length ? `
+      <section style="display:flex;flex-direction:column;gap:8px">
+        <span style="font-weight:700;font-size:15px;padding:0 4px">Accounts</span>
+        <div style="display:flex;gap:10px;overflow-x:auto;padding:2px 4px 6px">
+          ${V.dashboardAccounts.map(a => `
+            <button data-click="${H(a.onClick)}" style="flex:none;min-width:128px;background:${TH.surface};border:0;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,0.06);text-align:left">
+              <span style="width:32px;height:32px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center"><svg width="16" height="16"><use href="${a.icon}"></use></svg></span>
+              <span style="font-size:12.5px;color:${GREY};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.name}</span>
+              <span style="font-weight:600;font-variant-numeric:tabular-nums;font-size:14px">${a.balance}</span>
+            </button>`).join('')}
+        </div>
+      </section>` : ''}
+
+      ${V.budgetWatch.length ? `
+      <section style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:0 4px">
+          <span style="font-weight:700;font-size:15px">Budget status</span>
+          <button data-click="${H(() => { state.page = 'budget'; render(); })}" style="border:0;background:transparent;color:${ACCENT};font-weight:600;cursor:pointer;font-size:13px;padding:0">See all</button>
+        </div>
+        <div style="background:${V.globalBg};border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <span style="flex:1;height:9px;border-radius:5px;background:${V.globalTrack};overflow:hidden;display:block">
+              <span style="display:block;height:100%;width:${V.globalWidth};background:${V.globalColor}"></span>
+            </span>
+            <span style="font-weight:700;color:${V.globalColor};font-variant-numeric:tabular-nums;font-size:13.5px">${V.globalPct}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:${GREY};font-variant-numeric:tabular-nums">
+            <span>Spent: ${V.globalSpent}</span><span>Limit: ${V.globalLimit}</span>
+          </div>
+        </div>
+        <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+          ${V.budgetWatch.map(b => `
+            <button data-click="${H(b.onClick)}" style="width:100%;text-align:left;border:0;background:${TH.surface};padding:12px 16px;border-bottom:1px solid ${TH.border};display:flex;align-items:center;gap:12px;cursor:pointer">
+              <span style="width:34px;height:34px;border-radius:50%;background:${b.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="16" height="16"><use href="${b.icon}"></use></svg></span>
               <span style="flex:1;display:flex;flex-direction:column;gap:5px;min-width:0">
-                <span style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
-                  <span style="font-weight:600;font-size:14.5px">${r.name} <span style="color:${TH.textFaint};font-weight:400">${r.count}</span></span>
-                  <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${r.amountColor}">${r.amount}</span>
-                </span>
-                <span style="display:flex;align-items:center;gap:8px">
-                  <span style="font-size:12px;font-weight:600;color:${r.color};font-variant-numeric:tabular-nums;width:34px">${r.pct}</span>
-                  <span style="flex:1;height:7px;border-radius:4px;background:${TH.border};overflow:hidden;display:block">
-                    <span style="display:block;height:100%;width:${r.width};background:${r.color}"></span>
-                  </span>
-                </span>
+                <span style="display:flex;justify-content:space-between;font-size:13.5px;font-weight:600"><span>${b.name}</span><span style="color:${b.barColor}">${b.pct}</span></span>
+                <span style="height:6px;border-radius:3px;background:${TH.border};overflow:hidden;display:block"><span style="display:block;height:100%;width:${b.width};background:${b.barColor}"></span></span>
               </span>
-              <span style="width:30px;height:30px;border-radius:50%;border:1px solid ${TH.border};display:grid;place-items:center;color:${GREY};flex:none"><svg width="16" height="16"><use href="${r.chevron}"></use></svg></span>
-            </button>
-            ${r.open ? `
-              <div style="background:#f8f9fb;padding:4px 16px 12px 68px;animation:kb-in .18s ease both">
-                ${r.detail.map(d => `
-                  <div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid ${TH.border};font-size:13.5px">
-                    <span style="color:${GREY}">${d.left}</span>
-                    <span style="font-variant-numeric:tabular-nums;font-weight:500">${d.right}</span>
-                  </div>`).join('')}
-              </div>` : ''}
-          </div>`).join('')}
+            </button>`).join('')}
+        </div>
+      </section>` : ''}
+
+      <section style="display:flex;flex-direction:column;gap:8px">
+        <span style="font-weight:700;font-size:15px;padding:0 4px">Recent transactions</span>
+        <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+          ${V.recentTx.length ? V.recentTx.map(t => `
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid ${TH.border}">
+              <span style="width:34px;height:34px;border-radius:50%;background:${t.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="16" height="16"><use href="${t.icon}"></use></svg></span>
+              <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
+                <span style="font-weight:600;font-size:13.5px">${t.title}</span>
+                <span style="font-size:12px;color:${GREY}">${t.account} · ${t.date}</span>
+              </span>
+              <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${t.amountColor};flex:none">${t.amount}</span>
+            </div>`).join('') : `<div style="padding:24px 16px;text-align:center;color:${GREY};font-size:13.5px">No movements yet.</div>`}
+        </div>
       </section>
     </div>`;
 
