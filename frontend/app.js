@@ -793,7 +793,7 @@ function renderApp() {
     <div data-click="${H(() => { state.drawerOpen = false; render(); })}" style="position:fixed;inset:0;z-index:60;background:rgba(20,24,32,0.42);animation:kb-in .18s ease both">
       <div data-click="${H(e => e.stopPropagation())}" style="width:min(300px,82vw);height:100%;background:#f7f8fa;display:flex;flex-direction:column;box-shadow:4px 0 24px rgba(16,24,40,0.2)">
         <div style="background:linear-gradient(135deg,#6ea8fe,#e599f7 55%,#ffc9c9);padding:22px 20px 18px;display:flex;flex-direction:column;gap:10px">
-          <span style="width:56px;height:56px;border-radius:18px;background:#ffd43b;color:#1b1f26;display:grid;place-items:center;font-weight:700;font-size:24px">K</span>
+          <span style="width:56px;height:56px;border-radius:50%;background:#fff;display:grid;place-items:center;overflow:hidden"><img src="cat-logo.png" alt="MerlitoMoney" style="width:72%;height:72%;object-fit:contain"></span>
           <span style="font-weight:700;font-size:19px">MerlitoMoney</span>
         </div>
         ${V.drawerItems.map(d => `
