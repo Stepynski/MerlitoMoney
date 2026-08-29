@@ -1,6 +1,6 @@
 // Bump this on every deploy that changes cached files, so old clients pick up fresh assets.
-const CACHE_NAME = 'merlitomoney-shell-v1';
-const SHELL_FILES = ['/', '/index.html', '/app.js', '/manifest.json'];
+const CACHE_NAME = 'merlitomoney-shell-v2';
+const SHELL_FILES = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
