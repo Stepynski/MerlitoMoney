@@ -109,7 +109,7 @@ export function renderApp() {
         <span style="font-size:12px;color:#2f9e44;font-variant-numeric:tabular-nums">Total ${V.totalBalance}</span>
       </div>
       ${iconBtn(V, 'New movement', 'ic-plus', 22, () => openModal('movement', null, { movement: 'Expense', category: (state.cats.find(c => c.kind === 'expense') || {}).id || '', account: state.accounts[0] ? state.accounts[0].id : '' }))}
-      ${iconBtn(V, 'Search', 'ic-search', 20, () => { state.page = 'balance'; state.filtersOpen = true; render(); })}
+      ${iconBtn(V, 'Search', 'ic-search', 20, () => { state.page = 'balance'; state.balanceTab = 'movements'; state.filtersOpen = true; render(); })}
     </div>
 
     <div style="display:flex;align-items:center;justify-content:center;gap:clamp(8px,3vw,26px);padding:2px clamp(10px,2.4vw,20px) 12px">
@@ -235,56 +235,83 @@ export function renderApp() {
 
   const balancePage = !V.isBalance ? '' : `
     <div style="display:flex;flex-direction:column;gap:12px;animation:kb-up .25s ease both">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <button data-click="${H(() => { state.filtersOpen = !state.filtersOpen; render(); })}" style="border:1px solid ${V.filterBorder};background:${TH.surface};color:${V.filterColor};border-radius:11px;padding:9px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;font-weight:500;font-size:14px">
-          <svg width="17" height="17"><use href="#ic-filter"></use></svg>Filters ${V.filterCount}
-        </button>
-        <span style="flex:1"></span>
-        <span style="font-size:13px;color:${GREY};font-variant-numeric:tabular-nums">${V.movementSummary}</span>
+      <div style="display:flex;gap:6px;border-bottom:1px solid ${TH.border}">
+        ${V.balanceTabs.map(t => `
+          <button data-click="${H(t.onClick)}" style="flex:1;border:0;border-bottom:2.5px solid ${t.underline};background:transparent;color:${t.color};font-weight:${t.weight};padding:10px 4px;cursor:pointer">${t.label}</button>`).join('')}
       </div>
-      ${V.filtersOpen ? `
-        <section style="background:${TH.surface};border-radius:16px;padding:6px 16px 16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);animation:kb-in .2s ease both">
-          ${V.filterGroups.map(g => `
-            <div style="padding-top:14px">
-              <div style="font-size:12px;font-weight:600;color:${GREY};text-transform:uppercase;letter-spacing:0.06em;margin-bottom:9px">${g.title}</div>
-              <div style="display:flex;flex-wrap:wrap;gap:8px">
-                ${g.items.map(i => `
-                  <button data-click="${H(i.onClick)}" style="border:1.4px solid ${i.border};background:${i.bg};color:${i.color};border-radius:10px;padding:7px 12px;cursor:pointer;font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:7px">
-                    <svg width="15" height="15"><use href="${i.icon}"></use></svg>${i.label}
-                  </button>`).join('')}
-              </div>
-            </div>`).join('')}
-          <button data-click="${H(() => { state.fAccounts = []; state.fTypes = []; state.fCats = []; render(); })}" style="margin-top:16px;border:0;background:transparent;color:${ACCENT};cursor:pointer;font-weight:600;font-size:13.5px;padding:0">Reset all filters</button>
-        </section>` : ''}
-      <section style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
-        ${V.dayGroups.map(d => `
-          <div>
-            <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:${TH.surface2};border-top:1px solid ${TH.border};border-bottom:1px solid ${TH.border}">
-              <span style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1;min-width:30px">${d.day}</span>
-              <span style="display:flex;flex-direction:column;gap:0;flex:1">
-                <span style="font-size:11px;color:${GREY};letter-spacing:0.07em">${d.weekday}</span>
-                <span style="font-size:11.5px;font-weight:600;color:${GREY};letter-spacing:0.05em">${d.month}</span>
-              </span>
-              <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${d.netColor}">${d.net}</span>
-            </div>
-            ${d.items.map(t => `
-              <div style="display:flex;align-items:center;gap:13px;padding:12px 16px;border-bottom:1px solid ${TH.border}">
-                <span style="width:38px;height:38px;border-radius:50%;background:${t.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="19" height="19"><use href="${t.icon}"></use></svg></span>
-                <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
-                  <span style="font-weight:600;font-size:14.5px">${t.title}</span>
-                  <span style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:${GREY}">
-                    <svg width="13" height="13"><use href="${t.accountIcon}"></use></svg>${t.account}
+      ${V.showRecurringTab ? `
+        <section style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+          ${V.recurringRows.map(r => `
+            <div style="width:100%;border-bottom:1px solid ${TH.border};display:flex;align-items:center;gap:2px;padding:6px 10px 6px 18px;opacity:${r.dimmed ? '0.6' : '1'}">
+              <button data-click="${H(r.onClick)}" style="flex:1;min-width:0;text-align:left;border:0;background:transparent;padding:8px 0;display:flex;align-items:center;gap:14px;cursor:pointer">
+                <span style="width:42px;height:42px;border-radius:50%;background:${r.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="21" height="21"><use href="${r.icon}"></use></svg></span>
+                <span style="flex:1;display:flex;flex-direction:column;gap:3px;min-width:0">
+                  <span style="display:flex;align-items:baseline;gap:8px">
+                    <span style="font-weight:600">${r.name}</span>
+                    <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${r.amountColor}">${r.amount}</span>
                   </span>
-                  ${t.note ? `<span style="font-size:12.5px;color:${TH.textFaint};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.note)}</span>` : ''}
+                  <span style="font-size:12px;color:${GREY}">${r.freqLabel}</span>
+                  <span style="font-size:12px;color:${r.nextColor}">${r.nextLabel} · ${r.account}</span>
                 </span>
-                <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none">
-                  <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${t.amountColor}">${t.amount}</span>
-                  <span style="font-size:11.5px;color:${TH.textFaint}">${t.type}</span>
-                </span>
+              </button>
+              <button data-click="${H(r.onEdit)}" aria-label="Edit ${esc(r.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-edit"></use></svg></button>
+              <button data-click="${H(r.onDelete)}" aria-label="Delete ${esc(r.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-trash"></use></svg></button>
+            </div>`).join('')}
+          ${V.noRecurring ? `<div style="padding:34px 20px;text-align:center;color:${GREY}">No subscriptions or loans yet.</div>` : ''}
+        </section>
+        <button data-click="${H(() => openModal('recurring', null, { recurMovement: 'Expense', category: (state.cats.find(c => c.kind === 'expense') || {}).id || '' }))}" style="align-self:flex-start;border:1px solid ${TH.border};background:${TH.surface};border-radius:12px;padding:11px 18px;cursor:pointer;font-weight:600;color:${ACCENT};display:flex;align-items:center;gap:8px">
+          <svg width="18" height="18"><use href="#ic-plus"></use></svg>Add recurring
+        </button>` : `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button data-click="${H(() => { state.filtersOpen = !state.filtersOpen; render(); })}" style="border:1px solid ${V.filterBorder};background:${TH.surface};color:${V.filterColor};border-radius:11px;padding:9px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;font-weight:500;font-size:14px">
+            <svg width="17" height="17"><use href="#ic-filter"></use></svg>Filters ${V.filterCount}
+          </button>
+          <span style="flex:1"></span>
+          <span style="font-size:13px;color:${GREY};font-variant-numeric:tabular-nums">${V.movementSummary}</span>
+        </div>
+        ${V.filtersOpen ? `
+          <section style="background:${TH.surface};border-radius:16px;padding:6px 16px 16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);animation:kb-in .2s ease both">
+            ${V.filterGroups.map(g => `
+              <div style="padding-top:14px">
+                <div style="font-size:12px;font-weight:600;color:${GREY};text-transform:uppercase;letter-spacing:0.06em;margin-bottom:9px">${g.title}</div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px">
+                  ${g.items.map(i => `
+                    <button data-click="${H(i.onClick)}" style="border:1.4px solid ${i.border};background:${i.bg};color:${i.color};border-radius:10px;padding:7px 12px;cursor:pointer;font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:7px">
+                      <svg width="15" height="15"><use href="${i.icon}"></use></svg>${i.label}
+                    </button>`).join('')}
+                </div>
               </div>`).join('')}
-          </div>`).join('')}
-        ${V.noRows ? `<div style="padding:44px 20px;text-align:center;color:${GREY}">No movements match these filters.</div>` : ''}
-      </section>
+            <button data-click="${H(() => { state.fAccounts = []; state.fTypes = []; state.fCats = []; render(); })}" style="margin-top:16px;border:0;background:transparent;color:${ACCENT};cursor:pointer;font-weight:600;font-size:13.5px;padding:0">Reset all filters</button>
+          </section>` : ''}
+        <section style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+          ${V.dayGroups.map(d => `
+            <div>
+              <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:${TH.surface2};border-top:1px solid ${TH.border};border-bottom:1px solid ${TH.border}">
+                <span style="font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1;min-width:30px">${d.day}</span>
+                <span style="display:flex;flex-direction:column;gap:0;flex:1">
+                  <span style="font-size:11px;color:${GREY};letter-spacing:0.07em">${d.weekday}</span>
+                  <span style="font-size:11.5px;font-weight:600;color:${GREY};letter-spacing:0.05em">${d.month}</span>
+                </span>
+                <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${d.netColor}">${d.net}</span>
+              </div>
+              ${d.items.map(t => `
+                <div style="display:flex;align-items:center;gap:13px;padding:12px 16px;border-bottom:1px solid ${TH.border}">
+                  <span style="width:38px;height:38px;border-radius:50%;background:${t.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="19" height="19"><use href="${t.icon}"></use></svg></span>
+                  <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
+                    <span style="font-weight:600;font-size:14.5px">${t.title}</span>
+                    <span style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:${GREY}">
+                      <svg width="13" height="13"><use href="${t.accountIcon}"></use></svg>${t.account}
+                    </span>
+                    ${t.note ? `<span style="font-size:12.5px;color:${TH.textFaint};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.note)}</span>` : ''}
+                  </span>
+                  <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none">
+                    <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${t.amountColor}">${t.amount}</span>
+                    <span style="font-size:11.5px;color:${TH.textFaint}">${t.type}</span>
+                  </span>
+                </div>`).join('')}
+            </div>`).join('')}
+          ${V.noRows ? `<div style="padding:44px 20px;text-align:center;color:${GREY}">No movements match these filters.</div>` : ''}
+        </section>`}
     </div>`;
 
   const catMiniList = items => items.map(c => `
@@ -490,35 +517,9 @@ export function renderApp() {
       </section>
     </div>`;
 
-  const recurringPage = !V.isRecurring ? '' : `
-    <div style="display:flex;flex-direction:column;gap:14px;animation:kb-up .25s ease both">
-      <section style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
-        ${V.recurringRows.map(r => `
-          <div style="width:100%;border-bottom:1px solid ${TH.border};display:flex;align-items:center;gap:2px;padding:6px 10px 6px 18px;opacity:${r.dimmed ? '0.6' : '1'}">
-            <button data-click="${H(r.onClick)}" style="flex:1;min-width:0;text-align:left;border:0;background:transparent;padding:8px 0;display:flex;align-items:center;gap:14px;cursor:pointer">
-              <span style="width:42px;height:42px;border-radius:50%;background:${r.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="21" height="21"><use href="${r.icon}"></use></svg></span>
-              <span style="flex:1;display:flex;flex-direction:column;gap:3px;min-width:0">
-                <span style="display:flex;align-items:baseline;gap:8px">
-                  <span style="font-weight:600">${r.name}</span>
-                  <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${r.amountColor}">${r.amount}</span>
-                </span>
-                <span style="font-size:12px;color:${GREY}">${r.freqLabel}</span>
-                <span style="font-size:12px;color:${r.nextColor}">${r.nextLabel} · ${r.account}</span>
-              </span>
-            </button>
-            <button data-click="${H(r.onEdit)}" aria-label="Edit ${esc(r.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-edit"></use></svg></button>
-            <button data-click="${H(r.onDelete)}" aria-label="Delete ${esc(r.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-trash"></use></svg></button>
-          </div>`).join('')}
-        ${V.noRecurring ? `<div style="padding:34px 20px;text-align:center;color:${GREY}">No subscriptions or loans yet.</div>` : ''}
-      </section>
-      <button data-click="${H(() => openModal('recurring', null, { recurMovement: 'Expense', category: (state.cats.find(c => c.kind === 'expense') || {}).id || '' }))}" style="align-self:flex-start;border:1px solid ${TH.border};background:${TH.surface};border-radius:12px;padding:11px 18px;cursor:pointer;font-weight:600;color:${ACCENT};display:flex;align-items:center;gap:8px">
-        <svg width="18" height="18"><use href="#ic-plus"></use></svg>Add recurring
-      </button>
-    </div>`;
-
   const main = `<main style="flex:1;width:100%;background:${V.pageTint};transition:background .3s ease">
     <div style="max-width:1080px;margin:0 auto;padding:14px clamp(10px,2.4vw,20px) 110px;display:flex;flex-direction:column;gap:14px">
-      ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}${recurringPage}
+      ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}
     </div>
   </main>`;
 

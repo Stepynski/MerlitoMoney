@@ -115,7 +115,7 @@ export function computeView() {
   const saldo = T.inc - T.exp;
   const expView = s.view === 'expenses';
 
-  const nav = [['overview', 'Overview', 'ic-bars'], ['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['budget', 'Budget', 'ic-gauge'], ['recurring', 'Recurring', 'ic-refresh']];
+  const nav = [['overview', 'Overview', 'ic-bars'], ['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['budget', 'Budget', 'ic-gauge']];
 
   let cells;
   if (s.page === 'accounts') {
@@ -124,14 +124,7 @@ export function computeView() {
       { label: 'Savings', value: money(total - spendable), color: GREEN },
       { label: 'Net worth', value: money(total), color: TH.text }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
-  } else if (s.page === 'balance') {
-    const net = T.rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0);
-    cells = [
-      { label: 'Start balance', value: money(total - net), color: GREY },
-      { label: 'Change', value: money(net, true), color: net < 0 ? RED : GREEN },
-      { label: 'End balance', value: money(total), color: TH.text }
-    ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
-  } else if (s.page === 'recurring') {
+  } else if (s.page === 'balance' && s.balanceTab === 'recurring') {
     const active = s.recurring.filter(r => r.active);
     const monthlyExp = active.filter(r => r.type === 'Expense').reduce((a, r) => a + monthlyEquivalent(r), 0);
     const monthlyInc = active.filter(r => r.type === 'Income').reduce((a, r) => a + monthlyEquivalent(r), 0);
@@ -139,6 +132,13 @@ export function computeView() {
       { label: 'Monthly commitment', value: money(monthlyExp), color: RED },
       { label: 'Active rules', value: String(active.length), color: TH.text },
       { label: 'Recurring income', value: money(monthlyInc), color: GREEN }
+    ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
+  } else if (s.page === 'balance') {
+    const net = T.rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0);
+    cells = [
+      { label: 'Start balance', value: money(total - net), color: GREY },
+      { label: 'Change', value: money(net, true), color: net < 0 ? RED : GREEN },
+      { label: 'End balance', value: money(total), color: TH.text }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else {
     const sel = k => s.view === k;
@@ -170,7 +170,7 @@ export function computeView() {
           hasGoal: !!a.goal_amount, goalPct: a.goal_amount ? Math.min(100, a.balance / a.goal_amount * 100) + '%' : '0%',
           goalLabel: a.goal_amount ? Math.round(a.balance / a.goal_amount * 100) + '% of ' + short(a.goal_amount) : '',
           meta: own.length ? own.length + ' mov.' : 'new',
-          onClick: () => { s.page = 'balance'; s.fAccounts = [a.id]; s.filtersOpen = true; render(); },
+          onClick: () => { s.page = 'balance'; s.balanceTab = 'movements'; s.fAccounts = [a.id]; s.filtersOpen = true; render(); },
           onEdit: () => editAccount(a),
           onDelete: () => openModal('deleteAccount', a.id)
         };
@@ -409,7 +409,12 @@ export function computeView() {
     }),
     summaryCells: cells,
     isAccounts: s.page === 'accounts', isCategories: s.page === 'categories', isBalance: s.page === 'balance',
-    isOverview: s.page === 'overview', isBudget: s.page === 'budget', isRecurring: s.page === 'recurring',
+    isOverview: s.page === 'overview', isBudget: s.page === 'budget',
+    showRecurringTab: s.page === 'balance' && s.balanceTab === 'recurring',
+    balanceTabs: [['movements', 'Movements'], ['recurring', 'Recurring']].map(t => {
+      const on = s.balanceTab === t[0];
+      return { label: t[1], value: t[0], underline: on ? ACCENT : 'transparent', color: on ? ACCENT : GREY, weight: on ? '600' : '500', onClick: () => { s.balanceTab = t[0]; render(); } };
+    }),
     accountGroups, closedAccounts, recurringRows, noRecurring: recurringRows.length === 0,
     donut, donutLabel: s.view === 'income' ? 'Income' : 'Expenses', donutTotal: short(donutBase),
     legend, catSections,

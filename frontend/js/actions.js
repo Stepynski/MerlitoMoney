@@ -60,7 +60,7 @@ export async function submitModal(f) {
       note: f.note && f.note.trim() ? f.note.trim() : null
     };
     await api('/api/transactions', { method: 'POST', body: JSON.stringify(body) });
-    state.page = 'balance';
+    state.page = 'balance'; state.balanceTab = 'movements';
   } else if (state.modal === 'recurring') {
     const isTransfer = f.recurMovement === 'Transfer internal';
     const body = {
