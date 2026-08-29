@@ -188,6 +188,18 @@ export function computeView() {
       { label: 'Change', value: money(net, true), color: net < 0 ? RED : GREEN },
       { label: 'End balance', value: money(total), color: TH.text }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
+  } else if (s.page === 'overview') {
+    // Overview has no time-window selector (a snapshot dashboard, not a
+    // scoped report) — these three are plain, non-interactive, all-time
+    // figures rather than the period-scoped, clickable view-switcher used
+    // on Categories/Budget.
+    const allExp = s.tx.reduce((a, t) => a + (t.type === 'Expense' ? t.amount : 0), 0);
+    const allInc = s.tx.reduce((a, t) => a + (t.type === 'Income' ? t.amount : 0), 0);
+    cells = [
+      { label: 'Expenses', value: money(allExp), color: RED },
+      { label: 'Balance', value: money(total), color: TH.text },
+      { label: 'Income', value: money(allInc), color: GREEN }
+    ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else {
     const sel = k => s.view === k;
     cells = [
@@ -406,6 +418,7 @@ export function computeView() {
     })
   }));
   const spanDays = Math.max(1, Math.round((Math.min(P.end, new Date()) - P.start) / 86400000) + 1);
+  const spendChartTitle = (expView ? 'Expenses' : 'Income') + ' · ' + P.title;
 
   const bIds = Object.keys(s.budgets).map(Number).filter(id => cat(id));
   const budgetRows = bIds.map(id => {
@@ -441,61 +454,126 @@ export function computeView() {
     path: nwPath, area: nwPath + ` L100,${nwH} L0,${nwH} Z`,
     labels: nwPoints.map(p => p.label)
   };
-  // ---- loan payoff projection (pure client-side estimate for the Overview
-  // widget — same amortization formula as backend/recurring.py's
-  // _amortized_payment, ported to JS; this is a forward-looking display,
-  // not authoritative ledger data, so it doesn't need to match
-  // generate_due()'s actual future rounding to the cent) ----
+  // ---- loan payoff projection (Overview widget) ----
+  // Historical portion is built from real transactions — a loan's balance
+  // only ever changes on a transaction date (there's no daily accrual
+  // modeled), so it's genuinely a step function: flat between payments,
+  // then a discrete drop on each scheduled payment AND on any manual
+  // prepayment (a plain Transfer internal into the loan account, piggy
+  // button or not — same mechanism). Plotting real transaction dates
+  // instead of a smooth curve is what makes a prepayment show up as an
+  // actual step, without touching any earlier point on the line. The
+  // future portion (from today to the loan's scheduled end date) is a
+  // projection using the same amortization formula as
+  // backend/recurring.py's _amortized_payment — an estimate, not
+  // authoritative ledger data, so it doesn't need to match generate_due()'s
+  // future rounding to the cent.
   const amortizedPaymentJs = (principal, monthlyRate, n) => {
     if (n <= 0) return principal;
     if (monthlyRate === 0) return principal / n;
     const factor = Math.pow(1 + monthlyRate, n);
     return principal * monthlyRate * factor / (factor - 1);
   };
-  const activeLoans = s.accounts.filter(a =>
-    a.grp === 'loan' && a.active && a.loan && !a.loan.paid_off && a.loan.annual_rate != null && a.loan.term_months_remaining > 0
-  );
+  const stepValueAt = (points, t, key) => {
+    let val = points[0][key];
+    for (const p of points) {
+      if (+p.date > t) break;
+      val = p[key];
+    }
+    return val;
+  };
+  const activeLoans = s.accounts.filter(a => a.grp === 'loan' && a.active && a.loan && a.loan.annual_rate != null && a.loan.start_date && a.loan.end_date);
   let loanPayoffTrend = null;
   if (activeLoans.length) {
-    const maxMonths = Math.max(...activeLoans.map(a => a.loan.term_months_remaining));
-    const perLoanSeries = activeLoans.map(a => {
-      let balance = Math.max(0, -a.balance), remaining = a.loan.term_months_remaining;
+    const today = new Date();
+    const loanSeries = activeLoans.map(a => {
+      const start = new Date(a.loan.start_date + 'T00:00:00');
+      const end = new Date(a.loan.end_date + 'T00:00:00');
       const monthlyRate = (a.loan.annual_rate || 0) / 12;
-      const series = [balance];
-      for (let m = 1; m <= maxMonths; m++) {
-        if (remaining > 0 && balance > 0.005) {
-          const payment = amortizedPaymentJs(balance, monthlyRate, remaining);
-          const interest = balance * monthlyRate;
-          const principalPortion = Math.min(balance, payment - interest);
-          balance = Math.max(0, balance - principalPortion);
+      const interestByDate = {};
+      if (a.loan.rule_id) {
+        s.tx.filter(t => t.recurring_id === a.loan.rule_id && t.type === 'Expense')
+          .forEach(t => { interestByDate[t.date] = (interestByDate[t.date] || 0) + t.amount; });
+      }
+      let owed = Math.max(0, -a.starting_balance);
+      let interestCum = 0;
+      const points = [{ date: start, owed, interestCum }];
+      s.tx.filter(t => t.to_account_id === a.id && t.type === 'Transfer internal')
+        .slice().sort((x, y) => x._date - y._date)
+        .forEach(t => {
+          owed = Math.max(0, owed - t.amount);
+          interestCum += interestByDate[t.date] || 0;
+          points.push({ date: t._date, owed, interestCum });
+        });
+      // Flat line up to today even if the last real payment was a while ago.
+      points.push({ date: today, owed, interestCum });
+      // Projected future: monthly, recomputing the payment fresh each cycle
+      // from the current balance — exactly what generate_due() will do.
+      if (!a.loan.paid_off && owed > 0.5) {
+        let remaining = a.loan.term_months_remaining, bal = owed;
+        let cursor = a.loan.next_date ? new Date(a.loan.next_date + 'T00:00:00') : new Date(today.getFullYear(), today.getMonth() + 1, today.getDate());
+        while (remaining > 0 && bal > 0.005) {
+          const payment = amortizedPaymentJs(bal, monthlyRate, remaining);
+          const interest = bal * monthlyRate;
+          const principal = Math.min(bal, payment - interest);
+          bal = Math.max(0, bal - principal);
+          interestCum += interest;
+          points.push({ date: new Date(cursor), owed: bal, interestCum });
+          cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, cursor.getDate());
           remaining--;
         }
-        series.push(balance);
       }
-      return series;
+      const lastDate = points[points.length - 1].date;
+      return { start, end: lastDate > end ? lastDate : end, points };
     });
-    const combined = Array.from({ length: maxMonths + 1 }, (_, m) => perLoanSeries.reduce((sum, series) => sum + series[m], 0));
-    let payoffIdx = combined.findIndex(v => v <= 0.5);
-    if (payoffIdx === -1) payoffIdx = combined.length - 1;
-    const today = new Date();
-    const payoffDate = new Date(today.getFullYear(), today.getMonth() + payoffIdx, 1);
-    const lpMax = Math.max(...combined, 1);
-    const lpPad = 4, lpH = 34, lpInner = lpH - lpPad * 2;
-    const lpCoords = combined.map((v, i) => ({
-      x: combined.length > 1 ? i / (combined.length - 1) * 100 : 50,
-      y: lpPad + lpInner - (v / lpMax) * lpInner
+    const overallStart = new Date(Math.min(...loanSeries.map(ls => +ls.start)));
+    const overallEnd = new Date(Math.max(...loanSeries.map(ls => +ls.end), +today));
+    const span = Math.max(1, +overallEnd - +overallStart);
+
+    const dateSet = new Set([+overallStart, +overallEnd, +today]);
+    loanSeries.forEach(ls => ls.points.forEach(p => dateSet.add(+p.date)));
+    const allDates = Array.from(dateSet).sort((a, b) => a - b).map(t => new Date(t));
+    const combined = allDates.map(d => ({
+      date: d,
+      owed: loanSeries.reduce((sum, ls) => sum + stepValueAt(ls.points, +d, 'owed'), 0),
+      interestCum: loanSeries.reduce((sum, ls) => sum + stepValueAt(ls.points, +d, 'interestCum'), 0)
     }));
-    const lpPath = lpCoords.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(2) + ',' + p.y.toFixed(2)).join(' ');
-    const labelCount = Math.min(6, maxMonths + 1);
+
+    const lpPad = 4, lpH = 34, lpInner = lpH - lpPad * 2;
+    const lpMax = Math.max(1, ...combined.map(p => p.owed), ...combined.map(p => p.interestCum));
+    const xAt = d => (+d - +overallStart) / span * 100;
+    const yAt = v => lpPad + lpInner - (v / lpMax) * lpInner;
+    // Step-after path: hold each value flat until the next point's date,
+    // then drop/rise vertically — a real staircase, not an interpolated line.
+    const stepPath = key => {
+      let d = '';
+      combined.forEach((p, i) => {
+        const x = xAt(p.date), y = yAt(p[key]);
+        if (i === 0) { d += `M${x.toFixed(2)},${y.toFixed(2)}`; return; }
+        d += ` L${x.toFixed(2)},${yAt(combined[i - 1][key]).toFixed(2)} L${x.toFixed(2)},${y.toFixed(2)}`;
+      });
+      return d;
+    };
+    const owedPath = stepPath('owed');
+    const interestPath = stepPath('interestCum');
+
+    let payoffPoint = combined.find(p => p.owed <= 0.5 && p.date >= today);
+    const payoffDate = payoffPoint ? payoffPoint.date : overallEnd;
+    const todayX = xAt(today);
+    const labelCount = 6;
     const lpLabels = Array.from({ length: labelCount }, (_, k) => {
-      const idx = Math.round(k / Math.max(1, labelCount - 1) * maxMonths);
-      const d = new Date(today.getFullYear(), today.getMonth() + idx, 1);
-      return M3[d.getMonth()] + ' ’' + String(d.getFullYear()).slice(2);
+      const d = new Date(+overallStart + span * (k / (labelCount - 1)));
+      return M3[d.getMonth()] + " '" + String(d.getFullYear()).slice(2);
     });
+    const currentOwed = stepValueAt(combined, +today, 'owed');
+    const interestPaidToDate = stepValueAt(combined, +today, 'interestCum');
     loanPayoffTrend = {
-      current: money(combined[0]),
+      current: money(currentOwed),
+      interestPaid: money(interestPaidToDate),
       payoffLabel: MONTHS[payoffDate.getMonth()] + ' ' + payoffDate.getFullYear(),
-      path: lpPath, area: lpPath + ` L100,${lpH} L0,${lpH} Z`,
+      path: owedPath, area: owedPath + ` L100,${lpH} L0,${lpH} Z`,
+      interestPath,
+      todayX: todayX.toFixed(2),
       labels: lpLabels
     };
   }
@@ -588,6 +666,7 @@ export function computeView() {
     filterBorder: fCount ? ACCENT : TH.border, filterColor: fCount ? ACCENT : GREY,
     dayGroups, noRows: rows.length === 0,
     movementSummary: rows.length + ' movements · net ' + money(rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0), true),
+    spendChartTitle,
     axis, bars, barGap: bars.length > 20 ? '2px' : bars.length > 10 ? '5px' : '12px',
     netWorthTrend, hasLoanPayoff: !!loanPayoffTrend, loanPayoffTrend: loanPayoffTrend || {},
     dashboardAccounts, budgetWatch, topExpenseCats, topIncomeCats, insight, recentTx,

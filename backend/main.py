@@ -228,6 +228,9 @@ def list_accounts(request: Request):
                         "term_months_remaining": _months_between(nxt, end) if nxt else 0,
                         "next_date": nxt.isoformat() if nxt else None,
                         "paid_off": not bool(rule["active"]),
+                        "rule_id": rule["id"],
+                        "start_date": rule["start_date"],
+                        "end_date": rule["end_date"],
                     }
     return accounts
 

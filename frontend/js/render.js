@@ -136,6 +136,7 @@ export function renderApp() {
       ${iconBtn(V, 'Search', 'ic-search', 20, () => { state.page = 'balance'; state.balanceTab = 'movements'; state.filtersOpen = true; render(); })}
     </div>
 
+    ${V.isOverview ? '' : `
     <div style="display:flex;align-items:center;justify-content:center;gap:clamp(8px,3vw,26px);padding:2px clamp(10px,2.4vw,20px) 12px">
       <button data-click="${H(() => { shiftPeriod(-1); render(); })}" aria-label="Previous period" style="border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${ACCENT};flex:none"><svg width="20" height="20"><use href="#ic-left"></use></svg></button>
       <div style="position:relative;border:1px solid ${TH.border};border-radius:14px;padding:7px 16px;min-width:min(300px,72vw);text-align:center;background:${TH.surface}">
@@ -150,7 +151,7 @@ export function renderApp() {
         </select>
       </div>
       <button data-click="${H(() => { shiftPeriod(1); render(); })}" aria-label="Next period" style="border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${ACCENT};flex:none"><svg width="20" height="20"><use href="#ic-right"></use></svg></button>
-    </div>
+    </div>`}
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid ${TH.border};background:${TH.surface2}">
       ${V.summaryCells.map(c => `
@@ -410,22 +411,34 @@ export function renderApp() {
 
       ${V.hasLoanPayoff ? `
       <section style="background:${TH.surface};border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:8px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px">
           <span style="font-weight:700;font-size:15px">Loan payoff projection</span>
           <span style="font-size:12px;color:${GREY}">Estimated payoff: ${V.loanPayoffTrend.payoffLabel}</span>
         </div>
-        <span style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums">${V.loanPayoffTrend.current} owed today</span>
-        <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:70px;display:block">
-          <path d="${V.loanPayoffTrend.area}" fill="#e8890c22" stroke="none"></path>
+        <div style="display:flex;gap:18px;flex-wrap:wrap">
+          <span style="display:flex;flex-direction:column;gap:1px">
+            <span style="font-size:11px;color:${GREY};display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:#e8890c;display:inline-block"></span>Owed today</span>
+            <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${V.loanPayoffTrend.current}</span>
+          </span>
+          <span style="display:flex;flex-direction:column;gap:1px">
+            <span style="font-size:11px;color:${GREY};display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:#5c7cfa;display:inline-block"></span>Interest paid to date</span>
+            <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${V.loanPayoffTrend.interestPaid}</span>
+          </span>
+        </div>
+        <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:90px;display:block;overflow:visible">
+          <path d="${V.loanPayoffTrend.area}" fill="#e8890c1f" stroke="none"></path>
+          <line x1="${V.loanPayoffTrend.todayX}" y1="0" x2="${V.loanPayoffTrend.todayX}" y2="34" stroke="${TH.textFaint}" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>
+          <path d="${V.loanPayoffTrend.interestPath}" fill="none" stroke="#5c7cfa" stroke-width="1.3" vector-effect="non-scaling-stroke"></path>
           <path d="${V.loanPayoffTrend.path}" fill="none" stroke="#e8890c" stroke-width="1.6" vector-effect="non-scaling-stroke"></path>
         </svg>
         <div style="display:flex;justify-content:space-between;font-size:11px;color:${TH.textFaint}">
           ${V.loanPayoffTrend.labels.map(l => `<span>${l}</span>`).join('')}
         </div>
-        <span style="font-size:11px;color:${TH.textFaint}">Projected from today's rate and term — assumes no further prepayments and no rate changes.</span>
+        <span style="font-size:11px;color:${TH.textFaint}">Orange: balance owed. Blue: cumulative interest paid. Dashed line marks today — everything after it is a projection assuming today's rate and no further prepayments.</span>
       </section>` : ''}
 
       <section style="background:${TH.surface};border-radius:16px;padding:16px 16px 12px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+        <span style="font-weight:700;font-size:15px;display:block;padding-bottom:10px">${V.spendChartTitle}</span>
         <div style="display:grid;grid-template-columns:46px 1fr;gap:6px">
           <div style="display:flex;flex-direction:column;justify-content:space-between;height:210px;font-size:11px;color:${TH.textFaint};text-align:right;font-variant-numeric:tabular-nums;padding-right:4px">
             ${V.axis.map(a => `<span>${a}</span>`).join('')}
@@ -470,11 +483,14 @@ export function renderApp() {
         <span style="font-weight:700;font-size:15px;padding:0 4px">Accounts</span>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:2px 4px 6px">
           ${V.dashboardAccounts.map(a => `
-            <button data-click="${H(a.onClick)}" style="background:${TH.surface};border:0;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,0.06);text-align:left">
-              <span style="width:32px;height:32px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center"><svg width="16" height="16"><use href="${a.icon}"></use></svg></span>
-              <span style="font-size:12.5px;color:${GREY};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.name}</span>
-              <span style="font-weight:600;font-variant-numeric:tabular-nums;font-size:14px">${a.balance}</span>
-            </button>`).join('')}
+            <div style="position:relative;background:${TH.surface};border-radius:14px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+              <button data-click="${H(a.onClick)}" style="width:100%;border:0;background:transparent;padding:12px;display:flex;flex-direction:column;gap:8px;cursor:pointer;text-align:left">
+                <span style="width:32px;height:32px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center"><svg width="16" height="16"><use href="${a.icon}"></use></svg></span>
+                <span style="font-size:12.5px;color:${GREY};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:20px">${a.name}</span>
+                <span style="font-weight:600;font-variant-numeric:tabular-nums;font-size:14px">${a.balance}</span>
+              </button>
+              <button data-click="${H(a.onToggleNetWorth)}" aria-label="${a.includedInNetWorth ? 'Exclude' : 'Include'} ${esc(a.name)} from net worth" title="${a.includedInNetWorth ? 'Counted in net worth — click to exclude' : 'Excluded from net worth — click to include'}" style="position:absolute;top:8px;right:8px;border:0;background:${TH.surface2};width:24px;height:24px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${a.includedInNetWorth ? GREY : TH.textFaint}"><svg width="12" height="12"><use href="#${a.includedInNetWorth ? 'ic-eye' : 'ic-eye-off'}"></use></svg></button>
+            </div>`).join('')}
         </div>
       </section>` : ''}
 
