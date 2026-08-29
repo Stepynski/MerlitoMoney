@@ -10,8 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-from auth import check_password, ensure_password_seeded
-from db import get_conn, init_db, rows_to_dicts
+from auth import check_password, ensure_password_seeded, hash_password
+from db import ensure_default_categories, get_conn, init_db, rows_to_dicts
 from iban import is_valid_iban, normalize_iban
 from datetime import date
 from recurring import generate_due, next_occurrence
@@ -42,6 +42,7 @@ app.add_middleware(SessionMiddleware, secret_key=_session_secret())
 def startup():
     init_db()
     ensure_password_seeded()
+    ensure_default_categories()
     with get_conn() as conn:
         generate_due(conn)
 
@@ -74,6 +75,53 @@ def logout(request: Request):
 @app.get("/api/me")
 def me(request: Request):
     return {"authed": bool(request.session.get("authed"))}
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@app.post("/api/change-password")
+def change_password(body: ChangePasswordIn, request: Request):
+    require_auth(request)
+    if not check_password(body.current_password):
+        # Not 401: that status is special-cased client-side to mean "your
+        # session expired, log out" — a wrong *current* password here must
+        # not force the still-valid session back to the login screen.
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if len(body.new_password) < 4:
+        raise HTTPException(status_code=400, detail="New password must be at least 4 characters")
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE config SET value = ? WHERE key = 'password_hash'",
+            (hash_password(body.new_password),),
+        )
+    return {"ok": True}
+
+
+class DeleteAllDataIn(BaseModel):
+    password: str
+
+
+@app.post("/api/danger/delete-all")
+def delete_all_data(body: DeleteAllDataIn, request: Request):
+    require_auth(request)
+    if not check_password(body.password):
+        # Same reasoning as change_password: 400, not 401, so a wrong
+        # confirmation password doesn't get treated as an expired session.
+        raise HTTPException(status_code=400, detail="Wrong password")
+    with get_conn() as conn:
+        # Delete in FK-dependency order: transactions reference accounts/
+        # categories/recurring_rules, recurring_rules reference accounts,
+        # budgets reference categories.
+        conn.execute("DELETE FROM transactions")
+        conn.execute("DELETE FROM recurring_rules")
+        conn.execute("DELETE FROM budgets")
+        conn.execute("DELETE FROM accounts")
+        conn.execute("DELETE FROM categories")
+    ensure_default_categories()
+    return {"ok": True}
 
 
 # ---------- accounts ----------
@@ -279,6 +327,30 @@ def create_transaction(body: TransactionIn, request: Request):
             (body.date, body.account_id, body.to_account_id, body.type, body.category_id, body.amount, body.note),
         )
         return {"id": cur.lastrowid}
+
+
+class TransactionPatch(BaseModel):
+    account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    type: Optional[str] = None
+    category_id: Optional[int] = None
+    amount: Optional[float] = None
+    note: Optional[str] = None
+
+
+@app.patch("/api/transactions/{transaction_id}")
+def update_transaction(transaction_id: int, body: TransactionPatch, request: Request):
+    require_auth(request)
+    fields = body.dict(exclude_unset=True)
+    if not fields:
+        return {"ok": True}
+    with get_conn() as conn:
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(
+            f"UPDATE transactions SET {set_clause} WHERE id = ?",
+            (*fields.values(), transaction_id),
+        )
+    return {"ok": True}
 
 
 @app.delete("/api/transactions/{transaction_id}")
