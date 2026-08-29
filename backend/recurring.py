@@ -98,6 +98,21 @@ def next_occurrence(rule, after):
     raise ValueError(f'unknown freq: {freq}')
 
 
+def _account_balance(conn, account_id):
+    """Current running balance for a single account — same formula as
+    main.py's _account_balances(), scoped to one account since this module
+    doesn't import from main.py (avoids a circular import)."""
+    row = conn.execute("SELECT starting_balance FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    balance = row["starting_balance"]
+    for r in conn.execute("SELECT type, amount FROM transactions WHERE account_id = ?", (account_id,)):
+        balance += r["amount"] if r["type"] == "Income" else -r["amount"]
+    for r in conn.execute(
+        "SELECT amount FROM transactions WHERE to_account_id = ? AND type = 'Transfer internal'", (account_id,)
+    ):
+        balance += r["amount"]
+    return balance
+
+
 def generate_due(conn):
     """Materialize every occurrence due (up to today, or the rule's
     end_date if earlier) for every active rule. Idempotent — safe to call
@@ -115,11 +130,22 @@ def generate_due(conn):
             occ = next_occurrence(rule, after)
             if occ is None or occ > ceiling:
                 break
-            conn.execute(
-                "INSERT INTO transactions (date, account_id, to_account_id, type, category_id, amount, note, recurring_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (occ.isoformat(), rule['account_id'], rule['to_account_id'], rule['type'],
-                 rule['category_id'], rule['amount'], rule['note'], rule['id']),
-            )
+            if rule['amount_mode'] == 'full_balance':
+                # A credit-card autopay: sweep whatever is currently owed
+                # (a running balance, not a billing-cycle snapshot — see
+                # the plan notes). Nothing owed -> nothing to generate,
+                # but the schedule still advances so we don't re-check
+                # the same date forever.
+                owed = -_account_balance(conn, rule['to_account_id'])
+                amount = round(owed, 2) if owed > 0 else 0
+            else:
+                amount = rule['amount']
+            if amount:
+                conn.execute(
+                    "INSERT INTO transactions (date, account_id, to_account_id, type, category_id, amount, note, recurring_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (occ.isoformat(), rule['account_id'], rule['to_account_id'], rule['type'],
+                     rule['category_id'], amount, rule['note'], rule['id']),
+                )
             conn.execute("UPDATE recurring_rules SET last_generated_date = ? WHERE id = ?", (occ.isoformat(), rule['id']))
             after = occ

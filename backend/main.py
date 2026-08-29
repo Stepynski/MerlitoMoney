@@ -175,14 +175,34 @@ def _account_balances(conn) -> dict:
     return balances
 
 
+def _autopay_rule(conn, card_account_id):
+    return conn.execute(
+        "SELECT * FROM recurring_rules WHERE to_account_id = ? AND amount_mode = 'full_balance'",
+        (card_account_id,),
+    ).fetchone()
+
+
 @app.get("/api/accounts", dependencies=[])
 def list_accounts(request: Request):
     require_auth(request)
     with get_conn() as conn:
         accounts = rows_to_dicts(conn.execute("SELECT * FROM accounts ORDER BY id").fetchall())
         deltas = _account_balances(conn)
-    for a in accounts:
-        a["balance"] = a["starting_balance"] + deltas.get(a["id"], 0)
+        for a in accounts:
+            a["balance"] = a["starting_balance"] + deltas.get(a["id"], 0)
+            a["autopay"] = None
+            if a["grp"] == "credit":
+                rule = _autopay_rule(conn, a["id"])
+                if rule:
+                    after = date.fromisoformat(rule["last_generated_date"]) if rule["last_generated_date"] else None
+                    nxt = next_occurrence(dict(rule), after) if rule["active"] else None
+                    a["autopay"] = {
+                        "enabled": bool(rule["active"]),
+                        "from_account_id": rule["account_id"],
+                        "day_of_month": rule["day_of_month"],
+                        "weekend_rule": rule["weekend_rule"],
+                        "next_date": nxt.isoformat() if nxt else None,
+                    }
     return accounts
 
 
@@ -226,11 +246,71 @@ def update_account(account_id: int, body: AccountPatch, request: Request):
 def delete_account(account_id: int, request: Request):
     require_auth(request)
     with get_conn() as conn:
+        # Recurring rules FK-reference accounts too (e.g. a credit card's
+        # autopay, or any subscription paid from this account) — unlink the
+        # transactions they generated (same policy as deleting a recurring
+        # rule directly: keep the historical transactions) then delete the
+        # rules, before deleting transactions/accounts, or the deletes below
+        # fail under PRAGMA foreign_keys = ON.
+        conn.execute(
+            "UPDATE transactions SET recurring_id = NULL WHERE recurring_id IN "
+            "(SELECT id FROM recurring_rules WHERE account_id = ? OR to_account_id = ?)",
+            (account_id, account_id),
+        )
+        conn.execute("DELETE FROM recurring_rules WHERE account_id = ? OR to_account_id = ?", (account_id, account_id))
         # Transactions FK-reference accounts with no ON DELETE action, so any
         # transaction touching this account (either side of a transfer) must
         # go first, or the DELETE below fails under PRAGMA foreign_keys = ON.
         conn.execute("DELETE FROM transactions WHERE account_id = ? OR to_account_id = ?", (account_id, account_id))
         conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+    return {"ok": True}
+
+
+class AutopayIn(BaseModel):
+    enabled: bool
+    from_account_id: Optional[int] = None
+    day_of_month: Optional[int] = None
+    weekend_rule: str = "none"
+
+
+@app.put("/api/accounts/{account_id}/autopay")
+def set_autopay(account_id: int, body: AutopayIn, request: Request):
+    require_auth(request)
+    with get_conn() as conn:
+        card = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        if not card:
+            raise HTTPException(status_code=404, detail="Account not found")
+        existing = _autopay_rule(conn, account_id)
+        if not body.enabled:
+            # No grp check on the disable path: this also has to work as a
+            # cleanup call when an account is edited away from 'credit'.
+            if existing:
+                conn.execute("UPDATE recurring_rules SET active = 0 WHERE id = ?", (existing["id"],))
+            return {"ok": True}
+        if card["grp"] != "credit":
+            raise HTTPException(status_code=400, detail="Not a credit card account")
+        if body.from_account_id is None or body.day_of_month is None:
+            raise HTTPException(status_code=400, detail="from_account_id and day_of_month are required to enable autopay")
+        if not 1 <= body.day_of_month <= 31:
+            raise HTTPException(status_code=400, detail="day_of_month must be between 1 and 31")
+        if body.weekend_rule not in ("none", "before", "after"):
+            raise HTTPException(status_code=400, detail="Invalid weekend_rule")
+        from_account = conn.execute("SELECT id FROM accounts WHERE id = ?", (body.from_account_id,)).fetchone()
+        if not from_account:
+            raise HTTPException(status_code=400, detail="from_account_id does not exist")
+        if existing:
+            conn.execute(
+                "UPDATE recurring_rules SET account_id = ?, day_of_month = ?, weekend_rule = ?, active = 1 WHERE id = ?",
+                (body.from_account_id, body.day_of_month, body.weekend_rule, existing["id"]),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO recurring_rules "
+                "(name, type, account_id, to_account_id, amount, amount_mode, freq, interval_n, day_of_month, weekend_rule, start_date, active) "
+                "VALUES (?, 'Transfer internal', ?, ?, NULL, 'full_balance', 'monthly', 1, ?, ?, ?, 1)",
+                (f"{card['name']} autopay", body.from_account_id, account_id, body.day_of_month, body.weekend_rule, date.today().isoformat()),
+            )
+        generate_due(conn)
     return {"ok": True}
 
 

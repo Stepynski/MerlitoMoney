@@ -8,7 +8,7 @@ export const ICONS = [
   'ic-baby', 'ic-paw', 'ic-book', 'ic-graduation', 'ic-scissors', 'ic-shirt',
   'ic-music', 'ic-camera', 'ic-game', 'ic-ticket',
   'ic-dumbbell', 'ic-pill', 'ic-tooth',
-  'ic-invoice', 'ic-chart', 'ic-percent', 'ic-shield', 'ic-briefcase'
+  'ic-invoice', 'ic-chart', 'ic-percent', 'ic-shield', 'ic-briefcase', 'ic-card'
 ];
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 export const M3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

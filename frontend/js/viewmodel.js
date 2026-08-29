@@ -50,6 +50,7 @@ export function totals() {
 }
 export function unbudgeted() { return state.cats.filter(c => c.kind === 'expense' && state.budgets[c.id] === undefined); }
 export function monthlyEquivalent(r) {
+  if (r.amount_mode === 'full_balance') return 0; // future charges unknown, can't project
   const n = r.interval_n || 1;
   if (r.freq === 'daily') return r.amount * 30.44 / n;
   if (r.freq === 'weekly') return r.amount * 4.348 / n;
@@ -103,7 +104,8 @@ export function openModal(kind, editId, form) {
     icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '',
     recurMovement: 'Expense', freq: 'monthly', intervalN: '1', weekday: '0', dayOfMonth: '1', monthOfYear: '1',
     nthBusinessDay: '-1', weekendRule: 'none', startDate: new Date().toISOString().slice(0, 10), endDate: '', noEnd: true,
-    dangerPassword: '', dangerConfirm: '', currentPassword: '', newPassword: '', confirmNewPassword: ''
+    dangerPassword: '', dangerConfirm: '', currentPassword: '', newPassword: '', confirmNewPassword: '',
+    autopayEnabled: false, autopayFrom: '', autopayDay: '1', autopayWeekendRule: 'none'
   }, form || {});
   render();
 }
@@ -155,21 +157,39 @@ export function computeView() {
   }
 
   const editAccount = a => openModal('account', a.id, {
-    name: a.name, type: a.type, balance: String(a.starting_balance),
-    goal: a.goal_amount ? String(a.goal_amount) : '', kind: a.grp, iban: a.iban || ''
+    name: a.name, type: a.type,
+    balance: a.grp === 'credit' ? String(Math.abs(a.starting_balance)) : String(a.starting_balance),
+    goal: a.goal_amount ? String(a.goal_amount) : '', kind: a.grp, iban: a.iban || '',
+    autopayEnabled: !!(a.autopay && a.autopay.enabled),
+    autopayFrom: a.autopay && a.autopay.from_account_id ? a.autopay.from_account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || ''),
+    autopayDay: a.autopay ? String(a.autopay.day_of_month) : '1',
+    autopayWeekendRule: a.autopay ? a.autopay.weekend_rule : 'none'
   });
   const accountGroups = [
-    { key: 'spend', title: 'Accounts' }, { key: 'save', title: 'Savings accounts' }
+    { key: 'spend', title: 'Accounts' }, { key: 'save', title: 'Savings accounts' }, { key: 'credit', title: 'Credit cards' }
   ].map(g => {
     const items = s.accounts.filter(a => a.grp === g.key && a.active);
+    const isCredit = g.key === 'credit';
+    const groupSum = items.reduce((x, a) => x + a.balance, 0);
     return {
-      title: g.title, total: money(items.reduce((x, a) => x + a.balance, 0)),
+      title: g.title, total: money(groupSum), totalColor: groupSum < 0 ? RED : GREEN,
       items: items.map(a => {
         const own = s.tx.filter(t => t.account_id === a.id);
+        const owed = isCredit ? Math.max(0, -a.balance) : 0;
+        const utilPct = isCredit && a.goal_amount ? Math.min(100, owed / a.goal_amount * 100) : 0;
         return {
           name: a.name, type: a.type, icon: '#' + a.icon, color: a.color, balance: money(a.balance),
-          hasGoal: !!a.goal_amount, goalPct: a.goal_amount ? Math.min(100, a.balance / a.goal_amount * 100) + '%' : '0%',
-          goalLabel: a.goal_amount ? Math.round(a.balance / a.goal_amount * 100) + '% of ' + short(a.goal_amount) : '',
+          balanceColor: a.balance < 0 ? RED : GREEN,
+          hasGoal: !isCredit && !!a.goal_amount,
+          goalPct: !isCredit && a.goal_amount ? Math.min(100, a.balance / a.goal_amount * 100) + '%' : '0%',
+          goalLabel: !isCredit && a.goal_amount ? Math.round(a.balance / a.goal_amount * 100) + '% of ' + short(a.goal_amount) : '',
+          hasUtil: isCredit && !!a.goal_amount,
+          utilPct: utilPct + '%',
+          utilColor: utilPct > 70 ? RED : utilPct > 30 ? '#e8890c' : '#40c057',
+          utilLabel: isCredit && a.goal_amount ? Math.round(utilPct) + '% of ' + short(a.goal_amount) + ' limit' : '',
+          autopayLabel: !isCredit ? '' : (a.autopay && a.autopay.enabled
+            ? 'Autopay ' + (a.autopay.next_date ? 'on ' + dm(new Date(a.autopay.next_date + 'T00:00:00')) : 'scheduled')
+            : 'Autopay off'),
           meta: own.length ? own.length + ' mov.' : 'new',
           onClick: () => { s.page = 'balance'; s.balanceTab = 'movements'; s.fAccounts = [a.id]; s.filtersOpen = true; render(); },
           onEdit: () => editAccount(a),
@@ -197,13 +217,14 @@ export function computeView() {
     startDate: r.start_date, endDate: r.end_date || '', noEnd: !r.end_date
   });
   const recurringRows = s.recurring.map(r => {
-    const c = cat(r.category_id), a = acct(r.account_id);
+    const c = cat(r.category_id), a = acct(r.account_id), toA = acct(r.to_account_id);
+    const isFullBalance = r.amount_mode === 'full_balance';
     return {
       id: r.id, name: r.name, active: !!r.active,
-      icon: '#' + (c ? c.icon : (r.type === 'Income' ? 'ic-salary' : 'ic-refresh')),
-      color: c ? c.color : (r.type === 'Income' ? GREEN : GREY),
-      amount: money(r.type === 'Expense' ? -r.amount : r.amount, r.type === 'Income'),
-      amountColor: r.type === 'Expense' ? RED : r.type === 'Income' ? GREEN : GREY,
+      icon: '#' + (isFullBalance ? 'ic-card' : c ? c.icon : (r.type === 'Income' ? 'ic-salary' : 'ic-refresh')),
+      color: isFullBalance ? (toA ? toA.color : GREY) : c ? c.color : (r.type === 'Income' ? GREEN : GREY),
+      amount: isFullBalance ? 'Full balance' : money(r.type === 'Expense' ? -r.amount : r.amount, r.type === 'Income'),
+      amountColor: isFullBalance ? GREY : r.type === 'Expense' ? RED : r.type === 'Income' ? GREEN : GREY,
       account: a ? a.name : '—',
       freqLabel: describeFrequency(r),
       nextLabel: !r.active ? 'Paused' : (r.next_date ? 'Next: ' + dm(new Date(r.next_date + 'T00:00:00')) : 'Finished'),
@@ -476,12 +497,18 @@ export function computeView() {
     accountOptions: s.accounts.filter(a => a.active).map(a => ({ v: a.id, l: a.name + ' · ' + money(a.balance) })),
     toAccountOptions: s.accounts.filter(a => a.active && a.id !== s.form.account).map(a => ({ v: a.id, l: a.name })),
     formAmount: s.form.amount, formAccount: s.form.account, formToAccount: s.form.toAccount, formNote: s.form.note,
-    accountKinds: [['spend', 'Account', 'ic-wallet'], ['save', 'Savings account', 'ic-piggy']].map(k => ({
+    accountKinds: [['spend', 'Account', 'ic-wallet'], ['save', 'Savings account', 'ic-piggy'], ['credit', 'Credit card', 'ic-card']].map(k => ({
       value: k[0], label: k[1], icon: '#' + k[2],
       ring: s.form.kind === k[0] ? ACCENT : TH.border, dot: s.form.kind === k[0] ? ACCENT : 'transparent'
     })),
-    isSavingsKind: s.form.kind === 'save',
-    showIban: s.form.kind === 'save' || s.form.type === 'Bank',
+    isSavingsKind: s.form.kind === 'save', isCreditKind: s.form.kind === 'credit',
+    showIban: s.form.kind !== 'credit' && (s.form.kind === 'save' || s.form.type === 'Bank'),
+    balanceLabel: s.form.kind === 'credit' ? 'Current balance owed (optional)' : 'Initial balance',
+    goalLabel: s.form.kind === 'credit' ? 'Credit limit (optional)' : 'Savings goal',
+    formAutopayEnabled: s.form.autopayEnabled, formAutopayFrom: s.form.autopayFrom,
+    formAutopayDay: s.form.autopayDay, formAutopayWeekendRule: s.form.autopayWeekendRule,
+    autopayFromOptions: s.accounts.filter(a => a.grp === 'spend' && a.active && a.id !== s.editId).map(a => ({ v: a.id, l: a.name })),
+    autopayDayOptions: Array.from({ length: 31 }, (_, i) => i + 1).map(n => ({ v: String(n), l: String(n) })),
     formIban: s.form.iban, formError: s.formError,
     recurTypeTabs: [['Expense', 'Expense'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
       const on = s.form.recurMovement === t[0];
