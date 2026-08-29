@@ -13,6 +13,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from auth import check_password, ensure_password_seeded
 from db import get_conn, init_db, rows_to_dicts
 from iban import is_valid_iban, normalize_iban
+from datetime import date
+from recurring import generate_due, next_occurrence
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -40,6 +42,8 @@ app.add_middleware(SessionMiddleware, secret_key=_session_secret())
 def startup():
     init_db()
     ensure_password_seeded()
+    with get_conn() as conn:
+        generate_due(conn)
 
 
 def require_auth(request: Request):
@@ -261,6 +265,7 @@ def list_transactions(request: Request, start: Optional[str] = None, end: Option
         params = [start, end]
     query += " ORDER BY date DESC, id DESC"
     with get_conn() as conn:
+        generate_due(conn)
         return rows_to_dicts(conn.execute(query, params).fetchall())
 
 
@@ -315,6 +320,128 @@ def delete_budget(category_id: int, request: Request):
     require_auth(request)
     with get_conn() as conn:
         conn.execute("DELETE FROM budgets WHERE category_id = ?", (category_id,))
+    return {"ok": True}
+
+
+# ---------- recurring rules (subscriptions, loans, ...) ----------
+
+class RecurringIn(BaseModel):
+    name: str
+    type: str
+    account_id: int
+    to_account_id: Optional[int] = None
+    category_id: Optional[int] = None
+    amount: float
+    note: Optional[str] = None
+    freq: str
+    interval_n: int = 1
+    weekday: Optional[int] = None
+    day_of_month: Optional[int] = None
+    month_of_year: Optional[int] = None
+    nth_business_day: Optional[int] = None
+    weekend_rule: str = "none"
+    start_date: str
+    end_date: Optional[str] = None
+
+
+class RecurringPatch(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    category_id: Optional[int] = None
+    amount: Optional[float] = None
+    note: Optional[str] = None
+    freq: Optional[str] = None
+    interval_n: Optional[int] = None
+    weekday: Optional[int] = None
+    day_of_month: Optional[int] = None
+    month_of_year: Optional[int] = None
+    nth_business_day: Optional[int] = None
+    weekend_rule: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    active: Optional[bool] = None
+
+
+def _validate_recurring(freq, interval_n, weekday, day_of_month, month_of_year, nth_business_day):
+    if interval_n is None or interval_n < 1:
+        raise HTTPException(status_code=400, detail="interval_n must be at least 1")
+    if freq == "weekly" and (weekday is None or not 0 <= weekday <= 6):
+        raise HTTPException(status_code=400, detail="Weekly frequency requires a weekday (0-6)")
+    if freq in ("monthly", "yearly") and (day_of_month is None or not 1 <= day_of_month <= 31):
+        raise HTTPException(status_code=400, detail=f"{freq.capitalize()} frequency requires day_of_month (1-31)")
+    if freq == "yearly" and (month_of_year is None or not 1 <= month_of_year <= 12):
+        raise HTTPException(status_code=400, detail="Yearly frequency requires month_of_year (1-12)")
+    if freq == "monthly_nth_business_day" and (nth_business_day is None or nth_business_day == 0 or not -31 <= nth_business_day <= 31):
+        raise HTTPException(status_code=400, detail="monthly_nth_business_day requires a non-zero nth_business_day")
+
+
+@app.get("/api/recurring")
+def list_recurring(request: Request):
+    require_auth(request)
+    with get_conn() as conn:
+        generate_due(conn)
+        rules = rows_to_dicts(conn.execute("SELECT * FROM recurring_rules ORDER BY id").fetchall())
+    for r in rules:
+        r["next_date"] = None
+        if r["active"]:
+            after = date.fromisoformat(r["last_generated_date"]) if r["last_generated_date"] else None
+            nxt = next_occurrence(r, after)
+            if nxt and (not r["end_date"] or nxt <= date.fromisoformat(r["end_date"])):
+                r["next_date"] = nxt.isoformat()
+    return rules
+
+
+@app.post("/api/recurring")
+def create_recurring(body: RecurringIn, request: Request):
+    require_auth(request)
+    _validate_recurring(body.freq, body.interval_n, body.weekday, body.day_of_month, body.month_of_year, body.nth_business_day)
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO recurring_rules (name, type, account_id, to_account_id, category_id, amount, note, "
+            "freq, interval_n, weekday, day_of_month, month_of_year, nth_business_day, weekend_rule, start_date, end_date) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (body.name, body.type, body.account_id, body.to_account_id, body.category_id, body.amount, body.note,
+             body.freq, body.interval_n, body.weekday, body.day_of_month, body.month_of_year, body.nth_business_day,
+             body.weekend_rule, body.start_date, body.end_date),
+        )
+        generate_due(conn)
+        return {"id": cur.lastrowid}
+
+
+@app.patch("/api/recurring/{recurring_id}")
+def update_recurring(recurring_id: int, body: RecurringPatch, request: Request):
+    require_auth(request)
+    fields = body.dict(exclude_unset=True)
+    if not fields:
+        return {"ok": True}
+    if any(k in fields for k in ("freq", "interval_n", "weekday", "day_of_month", "month_of_year", "nth_business_day")):
+        with get_conn() as conn:
+            existing = conn.execute("SELECT * FROM recurring_rules WHERE id = ?", (recurring_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Recurring rule not found")
+        merged = dict(existing)
+        merged.update(fields)
+        _validate_recurring(merged["freq"], merged["interval_n"], merged["weekday"], merged["day_of_month"], merged["month_of_year"], merged["nth_business_day"])
+    with get_conn() as conn:
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(
+            f"UPDATE recurring_rules SET {set_clause} WHERE id = ?",
+            (*fields.values(), recurring_id),
+        )
+        generate_due(conn)
+    return {"ok": True}
+
+
+@app.delete("/api/recurring/{recurring_id}")
+def delete_recurring(recurring_id: int, request: Request):
+    require_auth(request)
+    with get_conn() as conn:
+        # Keep already-generated transactions (the charges genuinely happened);
+        # only unlink them, since recurring_id has no ON DELETE action.
+        conn.execute("UPDATE transactions SET recurring_id = NULL WHERE recurring_id = ?", (recurring_id,))
+        conn.execute("DELETE FROM recurring_rules WHERE id = ?", (recurring_id,))
     return {"ok": True}
 
 

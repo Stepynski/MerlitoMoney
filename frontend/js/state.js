@@ -9,14 +9,19 @@ export function saveThemePref(key, value) {
 
 export const state = {
   authed: false, loginError: '',
-  accounts: [], cats: [], tx: [], budgets: {},
+  accounts: [], cats: [], tx: [], budgets: {}, recurring: [],
   mode: 'month', anchor: new Date(), view: 'expenses',
   fAccounts: [], fTypes: [], fCats: [], filtersOpen: false,
   narrow: window.matchMedia('(max-width: 859px)').matches,
   drawerOpen: false, modal: null, editId: null, formError: '',
   themeStyle: loadThemePref('mm_theme_style', 'colorful'),
   themeMode: loadThemePref('mm_theme_mode', window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
-  form: { name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '' }
+  form: {
+    name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: '', toAccount: '',
+    icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '',
+    recurMovement: 'Expense', freq: 'monthly', intervalN: '1', weekday: '0', dayOfMonth: '1', monthOfYear: '1',
+    nthBusinessDay: '-1', weekendRule: 'none', startDate: new Date().toISOString().slice(0, 10), endDate: '', noEnd: true
+  }
 };
 
 // Debug instrumentation: state.page is the one piece of state a user has

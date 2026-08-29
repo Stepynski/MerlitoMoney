@@ -49,6 +49,31 @@ export function totals() {
   return { rows, byCat, counts, exp, inc };
 }
 export function unbudgeted() { return state.cats.filter(c => c.kind === 'expense' && state.budgets[c.id] === undefined); }
+export function monthlyEquivalent(r) {
+  const n = r.interval_n || 1;
+  if (r.freq === 'daily') return r.amount * 30.44 / n;
+  if (r.freq === 'weekly') return r.amount * 4.348 / n;
+  if (r.freq === 'yearly') return r.amount / (12 * n);
+  return r.amount / n; // monthly, monthly_nth_business_day
+}
+export function describeFrequency(r) {
+  const WD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const ord = n => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+  const every = r.interval_n > 1 ? `Every ${r.interval_n} ` : null;
+  let base;
+  if (r.freq === 'daily') base = every ? `${every}days` : 'Daily';
+  else if (r.freq === 'weekly') base = every ? `${every}weeks on ${WD[r.weekday]}` : `Weekly on ${WD[r.weekday]}`;
+  else if (r.freq === 'monthly') base = every ? `${every}months on the ${ord(r.day_of_month)}` : `Monthly on the ${ord(r.day_of_month)}`;
+  else if (r.freq === 'yearly') base = `${every ? every + 'years' : 'Yearly'} on ${MONTHS[r.month_of_year - 1]} ${ord(r.day_of_month)}`;
+  else if (r.freq === 'monthly_nth_business_day') {
+    const nb = r.nth_business_day;
+    base = nb === -1 ? 'Last business day of the month' : nb === 1 ? 'First business day of the month'
+      : nb > 0 ? `${ord(nb)} business day of the month` : `${ord(-nb)}-to-last business day of the month`;
+  } else base = r.freq;
+  if (r.weekend_rule === 'before') base += ' · moved earlier if on a weekend';
+  else if (r.weekend_rule === 'after') base += ' · moved later if on a weekend';
+  return base;
+}
 export function netWorthHistory(monthsBack) {
   const s = state;
   const sorted = s.tx.slice().sort((a, b) => a._date - b._date);
@@ -73,7 +98,12 @@ export function toggle(key, id) {
 }
 export function openModal(kind, editId, form) {
   state.modal = kind; state.editId = editId || null; state.drawerOpen = false; state.formError = '';
-  state.form = Object.assign({ name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '' }, form || {});
+  state.form = Object.assign({
+    name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '',
+    icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '',
+    recurMovement: 'Expense', freq: 'monthly', intervalN: '1', weekday: '0', dayOfMonth: '1', monthOfYear: '1',
+    nthBusinessDay: '-1', weekendRule: 'none', startDate: new Date().toISOString().slice(0, 10), endDate: '', noEnd: true
+  }, form || {});
   render();
 }
 
@@ -85,7 +115,7 @@ export function computeView() {
   const saldo = T.inc - T.exp;
   const expView = s.view === 'expenses';
 
-  const nav = [['overview', 'Overview', 'ic-bars'], ['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['budget', 'Budget', 'ic-gauge']];
+  const nav = [['overview', 'Overview', 'ic-bars'], ['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['budget', 'Budget', 'ic-gauge'], ['recurring', 'Recurring', 'ic-refresh']];
 
   let cells;
   if (s.page === 'accounts') {
@@ -100,6 +130,15 @@ export function computeView() {
       { label: 'Start balance', value: money(total - net), color: GREY },
       { label: 'Change', value: money(net, true), color: net < 0 ? RED : GREEN },
       { label: 'End balance', value: money(total), color: TH.text }
+    ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
+  } else if (s.page === 'recurring') {
+    const active = s.recurring.filter(r => r.active);
+    const monthlyExp = active.filter(r => r.type === 'Expense').reduce((a, r) => a + monthlyEquivalent(r), 0);
+    const monthlyInc = active.filter(r => r.type === 'Income').reduce((a, r) => a + monthlyEquivalent(r), 0);
+    cells = [
+      { label: 'Monthly commitment', value: money(monthlyExp), color: RED },
+      { label: 'Active rules', value: String(active.length), color: TH.text },
+      { label: 'Recurring income', value: money(monthlyInc), color: GREEN }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else {
     const sel = k => s.view === k;
@@ -143,6 +182,33 @@ export function computeView() {
     onReopen: () => reopenAccount(a.id),
     onDelete: () => openModal('deleteAccount', a.id)
   }));
+
+  const editRecurring = r => openModal('recurring', r.id, {
+    name: r.name, recurMovement: r.type, account: r.account_id, toAccount: r.to_account_id || '',
+    category: r.category_id || '', amount: money(r.amount).replace(' €', '').trim(), note: r.note || '',
+    freq: r.freq, intervalN: String(r.interval_n), weekday: String(r.weekday != null ? r.weekday : 0),
+    dayOfMonth: String(r.day_of_month || 1), monthOfYear: String(r.month_of_year || 1),
+    nthBusinessDay: String(r.nth_business_day != null ? r.nth_business_day : -1), weekendRule: r.weekend_rule,
+    startDate: r.start_date, endDate: r.end_date || '', noEnd: !r.end_date
+  });
+  const recurringRows = s.recurring.map(r => {
+    const c = cat(r.category_id), a = acct(r.account_id);
+    return {
+      id: r.id, name: r.name, active: !!r.active,
+      icon: '#' + (c ? c.icon : (r.type === 'Income' ? 'ic-salary' : 'ic-refresh')),
+      color: c ? c.color : (r.type === 'Income' ? GREEN : GREY),
+      amount: money(r.type === 'Expense' ? -r.amount : r.amount, r.type === 'Income'),
+      amountColor: r.type === 'Expense' ? RED : r.type === 'Income' ? GREEN : GREY,
+      account: a ? a.name : '—',
+      freqLabel: describeFrequency(r),
+      nextLabel: !r.active ? 'Paused' : (r.next_date ? 'Next: ' + dm(new Date(r.next_date + 'T00:00:00')) : 'Finished'),
+      nextColor: !r.active ? TH.textFaint : GREY,
+      dimmed: !r.active,
+      onClick: () => editRecurring(r),
+      onEdit: () => editRecurring(r),
+      onDelete: () => openModal('deleteRecurring', r.id)
+    };
+  }).sort((a, b) => (a.active === b.active ? 0 : a.active ? -1 : 1));
 
   const kind = s.view === 'income' ? 'income' : 'expense';
   const donutBase = s.view === 'income' ? T.inc : T.exp;
@@ -320,9 +386,12 @@ export function computeView() {
     category: [s.editId ? 'Edit category' : 'New category', 'Apply'],
     budget: [s.editId ? 'Edit budget' : 'Set budget', 'Save'],
     deleteAccount: ['Delete account', ''],
+    recurring: [s.editId ? 'Edit recurring' : 'New recurring', 'Save'],
+    deleteRecurring: ['Manage recurring rule', ''],
     settings: ['Settings', '']
   }[s.modal] || ['', ''];
   const deleteAccountTarget = s.modal === 'deleteAccount' ? acct(s.editId) : null;
+  const deleteRecurringTarget = s.modal === 'deleteRecurring' ? s.recurring.find(r => r.id === s.editId) : null;
 
   return {
     isNarrow: s.narrow, isWide: !s.narrow,
@@ -340,8 +409,8 @@ export function computeView() {
     }),
     summaryCells: cells,
     isAccounts: s.page === 'accounts', isCategories: s.page === 'categories', isBalance: s.page === 'balance',
-    isOverview: s.page === 'overview', isBudget: s.page === 'budget',
-    accountGroups, closedAccounts,
+    isOverview: s.page === 'overview', isBudget: s.page === 'budget', isRecurring: s.page === 'recurring',
+    accountGroups, closedAccounts, recurringRows, noRecurring: recurringRows.length === 0,
     donut, donutLabel: s.view === 'income' ? 'Income' : 'Expenses', donutTotal: short(donutBase),
     legend, catSections,
     filtersOpen: s.filtersOpen,
@@ -367,6 +436,10 @@ export function computeView() {
     isDeleteAccountModal: s.modal === 'deleteAccount',
     deleteAccountName: deleteAccountTarget ? deleteAccountTarget.name : '',
     deleteAccountMovCount: deleteAccountTarget ? s.tx.filter(t => t.account_id === deleteAccountTarget.id || t.to_account_id === deleteAccountTarget.id).length : 0,
+    isRecurringModal: s.modal === 'recurring', isDeleteRecurringModal: s.modal === 'deleteRecurring',
+    deleteRecurringName: deleteRecurringTarget ? deleteRecurringTarget.name : '',
+    deleteRecurringPaused: deleteRecurringTarget ? !deleteRecurringTarget.active : false,
+    deleteRecurringTxCount: deleteRecurringTarget ? s.tx.filter(t => t.recurring_id === deleteRecurringTarget.id).length : 0,
     modalTitle: modalMeta[0], modalCta: modalMeta[1],
     movementTabs: [['Expense', 'Expenses'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
       const on = s.form.movement === t[0];
@@ -388,6 +461,32 @@ export function computeView() {
     isSavingsKind: s.form.kind === 'save',
     showIban: s.form.kind === 'save' || s.form.type === 'Bank',
     formIban: s.form.iban, formError: s.formError,
+    recurTypeTabs: [['Expense', 'Expense'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
+      const on = s.form.recurMovement === t[0];
+      return { label: t[1], value: t[0], underline: on ? ACCENT : 'transparent', color: on ? ACCENT : GREY, weight: on ? '600' : '500' };
+    }),
+    isRecurTransfer: s.form.recurMovement === 'Transfer internal',
+    recurCats: s.cats.filter(c => c.kind === (s.form.recurMovement === 'Income' ? 'income' : 'expense')).map(c => ({ v: c.id, l: c.name })),
+    freqOptions: [
+      ['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly'], ['yearly', 'Yearly'],
+      ['monthly_nth_business_day', 'Nth business day of the month']
+    ].map(f => ({ v: f[0], l: f[1] })),
+    formFreq: s.form.freq,
+    isFreqWeekly: s.form.freq === 'weekly', isFreqMonthly: s.form.freq === 'monthly',
+    isFreqYearly: s.form.freq === 'yearly', isFreqNthBiz: s.form.freq === 'monthly_nth_business_day',
+    showWeekendRule: ['daily', 'weekly', 'monthly', 'yearly'].indexOf(s.form.freq) >= 0,
+    formIntervalN: s.form.intervalN,
+    intervalUnit: { daily: 'day(s)', weekly: 'week(s)', monthly: 'month(s)', yearly: 'year(s)', monthly_nth_business_day: 'month(s)' }[s.form.freq] || '',
+    weekdayOptions: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((l, i) => ({ v: i, l })),
+    formWeekday: s.form.weekday,
+    formDayOfMonth: s.form.dayOfMonth,
+    monthOptions: MONTHS.map((l, i) => ({ v: i + 1, l })),
+    formMonthOfYear: s.form.monthOfYear,
+    nthBizOptions: [['1', 'First business day'], ['2', '2nd business day'], ['3', '3rd business day'], ['-1', 'Last business day'], ['-2', '2nd-to-last business day'], ['-3', '3rd-to-last business day']].map(o => ({ v: o[0], l: o[1] })),
+    formNthBusinessDay: s.form.nthBusinessDay,
+    weekendRuleOptions: [['none', "Don't shift"], ['before', 'Move earlier (before the weekend)'], ['after', 'Move later (after the weekend)']].map(o => ({ v: o[0], l: o[1] })),
+    formWeekendRule: s.form.weekendRule,
+    formStartDate: s.form.startDate, formEndDate: s.form.endDate, formNoEnd: s.form.noEnd,
     formName: s.form.name, formType: s.form.type, formBalance: s.form.balance, formGoal: s.form.goal,
     formColor: s.form.color, formIconRef: '#' + s.form.icon,
     iconChoices: ICONS.map(i => ({

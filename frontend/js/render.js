@@ -4,7 +4,7 @@ import { THEME_STYLES, THEMES } from './themes.js';
 import { saveThemePref } from './state.js';
 import { RED } from './constants.js';
 import { computeView, set, openModal, shiftPeriod, unbudgeted } from './viewmodel.js';
-import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, logoutAction } from './actions.js';
+import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, logoutAction } from './actions.js';
 
 // ---------- event delegation ----------
 export let handlers = [];
@@ -490,9 +490,35 @@ export function renderApp() {
       </section>
     </div>`;
 
+  const recurringPage = !V.isRecurring ? '' : `
+    <div style="display:flex;flex-direction:column;gap:14px;animation:kb-up .25s ease both">
+      <section style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+        ${V.recurringRows.map(r => `
+          <div style="width:100%;border-bottom:1px solid ${TH.border};display:flex;align-items:center;gap:2px;padding:6px 10px 6px 18px;opacity:${r.dimmed ? '0.6' : '1'}">
+            <button data-click="${H(r.onClick)}" style="flex:1;min-width:0;text-align:left;border:0;background:transparent;padding:8px 0;display:flex;align-items:center;gap:14px;cursor:pointer">
+              <span style="width:42px;height:42px;border-radius:50%;background:${r.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="21" height="21"><use href="${r.icon}"></use></svg></span>
+              <span style="flex:1;display:flex;flex-direction:column;gap:3px;min-width:0">
+                <span style="display:flex;align-items:baseline;gap:8px">
+                  <span style="font-weight:600">${r.name}</span>
+                  <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${r.amountColor}">${r.amount}</span>
+                </span>
+                <span style="font-size:12px;color:${GREY}">${r.freqLabel}</span>
+                <span style="font-size:12px;color:${r.nextColor}">${r.nextLabel} · ${r.account}</span>
+              </span>
+            </button>
+            <button data-click="${H(r.onEdit)}" aria-label="Edit ${esc(r.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-edit"></use></svg></button>
+            <button data-click="${H(r.onDelete)}" aria-label="Delete ${esc(r.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-trash"></use></svg></button>
+          </div>`).join('')}
+        ${V.noRecurring ? `<div style="padding:34px 20px;text-align:center;color:${GREY}">No subscriptions or loans yet.</div>` : ''}
+      </section>
+      <button data-click="${H(() => openModal('recurring', null, { recurMovement: 'Expense', category: (state.cats.find(c => c.kind === 'expense') || {}).id || '' }))}" style="align-self:flex-start;border:1px solid ${TH.border};background:${TH.surface};border-radius:12px;padding:11px 18px;cursor:pointer;font-weight:600;color:${ACCENT};display:flex;align-items:center;gap:8px">
+        <svg width="18" height="18"><use href="#ic-plus"></use></svg>Add recurring
+      </button>
+    </div>`;
+
   const main = `<main style="flex:1;width:100%;background:${V.pageTint};transition:background .3s ease">
     <div style="max-width:1080px;margin:0 auto;padding:14px clamp(10px,2.4vw,20px) 110px;display:flex;flex-direction:column;gap:14px">
-      ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}
+      ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}${recurringPage}
     </div>
   </main>`;
 
@@ -529,7 +555,7 @@ export function renderApp() {
         <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:${TH.surface2};z-index:2">
           <button data-click="${H(() => { console.log('[mm debug] modal closed via X button, modal was', state.modal); state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
           <span style="font-size:19px;font-weight:700;flex:1">${V.modalTitle}</span>
-          ${V.isSettingsModal || V.isDeleteAccountModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
+          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
         </div>
         <div style="padding:0 18px 20px;display:flex;flex-direction:column;gap:14px">
           ${V.isDeleteAccountModal ? `
@@ -653,6 +679,109 @@ export function renderApp() {
                 <button data-click="${H(() => removeBudgetAction())}" style="border:0;background:${TH.surface};color:#d93a34;border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
                   <svg width="18" height="18"><use href="#ic-trash"></use></svg>Remove budget
                 </button>` : ''}
+            </div>` : ''}
+
+          ${V.isRecurringModal ? `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;gap:6px;border-bottom:1px solid ${TH.border}">
+                ${V.recurTypeTabs.map(t => `
+                  <button data-click="${H(() => { set('recurMovement', t.value); render(); })}" style="flex:1;border:0;border-bottom:2.5px solid ${t.underline};background:transparent;color:${t.color};font-weight:${t.weight};padding:10px 4px;cursor:pointer">${t.label}</button>`).join('')}
+              </div>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Name
+                <input id="f-name" value="${esc(V.formName)}" placeholder="e.g. Netflix, Car loan" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Amount
+                <input id="f-amount" value="${esc(V.formAmount)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+              </label>
+              ${!V.isRecurTransfer ? `
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Category
+                  <select data-change="${H(e => { set('category', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${V.recurCats.map(o => `<option value="${o.v}" ${o.v === V.formCategory ? 'selected' : ''}>${o.l}</option>`).join('')}
+                  </select>
+                </label>` : ''}
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Account
+                <select data-change="${H(e => { set('account', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                  ${V.accountOptions.map(o => `<option value="${o.v}" ${o.v === V.formAccount ? 'selected' : ''}>${o.l}</option>`).join('')}
+                </select>
+              </label>
+              ${V.isRecurTransfer ? `
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">To account
+                  <select data-change="${H(e => { set('toAccount', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${V.toAccountOptions.map(o => `<option value="${o.v}" ${o.v === V.formToAccount ? 'selected' : ''}>${o.l}</option>`).join('')}
+                  </select>
+                </label>` : ''}
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Description (optional)
+                <input id="f-note" value="${esc(V.formNote)}" placeholder="e.g. Family plan" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+              </label>
+
+              <div style="height:1px;background:${TH.border};margin:4px 0"></div>
+              <span style="font-size:12px;font-weight:600;color:${GREY};text-transform:uppercase;letter-spacing:0.06em">Schedule</span>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Frequency
+                <select data-change="${H(e => { set('freq', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                  ${V.freqOptions.map(o => `<option value="${o.v}" ${o.v === V.formFreq ? 'selected' : ''}>${o.l}</option>`).join('')}
+                </select>
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Every
+                <select data-change="${H(e => { set('intervalN', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                  ${Array.from({ length: 12 }, (_, i) => i + 1).map(n => `<option value="${n}" ${String(n) === V.formIntervalN ? 'selected' : ''}>${n} ${V.intervalUnit}</option>`).join('')}
+                </select>
+              </label>
+              ${V.isFreqWeekly ? `
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Day of the week
+                  <select data-change="${H(e => { set('weekday', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${V.weekdayOptions.map(o => `<option value="${o.v}" ${String(o.v) === V.formWeekday ? 'selected' : ''}>${o.l}</option>`).join('')}
+                  </select>
+                </label>` : ''}
+              ${V.isFreqMonthly || V.isFreqYearly ? `
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Day of the month
+                  <select data-change="${H(e => { set('dayOfMonth', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${Array.from({ length: 31 }, (_, i) => i + 1).map(n => `<option value="${n}" ${String(n) === V.formDayOfMonth ? 'selected' : ''}>${n}</option>`).join('')}
+                  </select>
+                </label>` : ''}
+              ${V.isFreqYearly ? `
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Month
+                  <select data-change="${H(e => { set('monthOfYear', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${V.monthOptions.map(o => `<option value="${o.v}" ${String(o.v) === V.formMonthOfYear ? 'selected' : ''}>${o.l}</option>`).join('')}
+                  </select>
+                </label>` : ''}
+              ${V.isFreqNthBiz ? `
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Which business day
+                  <select data-change="${H(e => { set('nthBusinessDay', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${V.nthBizOptions.map(o => `<option value="${o.v}" ${o.v === V.formNthBusinessDay ? 'selected' : ''}>${o.l}</option>`).join('')}
+                  </select>
+                </label>` : ''}
+              ${V.showWeekendRule ? `
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">If it lands on a weekend
+                  <select data-change="${H(e => { set('weekendRule', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${V.weekendRuleOptions.map(o => `<option value="${o.v}" ${o.v === V.formWeekendRule ? 'selected' : ''}>${o.l}</option>`).join('')}
+                  </select>
+                </label>` : ''}
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Starts
+                  <input type="date" data-change="${H(e => { set('startDate', e.target.value); render(); })}" value="${V.formStartDate}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY};${V.formNoEnd ? 'opacity:0.5' : ''}">Ends
+                  <input type="date" data-change="${H(e => { set('endDate', e.target.value); render(); })}" value="${V.formEndDate}" ${V.formNoEnd ? 'disabled' : ''} style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+                </label>
+              </div>
+              <label style="display:flex;align-items:center;gap:9px;cursor:pointer">
+                <input type="checkbox" data-change="${H(e => { set('noEnd', e.target.checked); render(); })}" ${V.formNoEnd ? 'checked' : ''} style="width:17px;height:17px;cursor:pointer">
+                <span style="font-size:13.5px">No end date</span>
+              </label>
+              ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
+            </div>` : ''}
+
+          ${V.isDeleteRecurringModal ? `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <p style="margin:0;font-size:14px;color:${GREY};line-height:1.5">
+                <strong style="color:${TH.text}">${esc(V.deleteRecurringName)}</strong> has generated ${V.deleteRecurringTxCount} movement${V.deleteRecurringTxCount === 1 ? '' : 's'} so far. Pausing keeps everything and stops future charges from generating. Deleting removes the rule and unlinks its past movements — they stay in your ledger, but won't count as recurring anymore.
+              </p>
+              ${V.deleteRecurringPaused
+                ? `<button data-click="${H(() => resumeRecurringAction())}" style="border:1px solid ${TH.border};background:${TH.surface};color:${TH.text};border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Resume</button>`
+                : `<button data-click="${H(() => pauseRecurringAction())}" style="border:1px solid ${TH.border};background:${TH.surface};color:${TH.text};border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Pause — keep for later</button>`}
+              <button data-click="${H(() => deleteRecurringAction())}" style="border:0;background:${TH.surface};color:${RED};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                <svg width="18" height="18"><use href="#ic-trash"></use></svg>Delete rule
+              </button>
             </div>` : ''}
 
           ${V.isSettingsModal ? `

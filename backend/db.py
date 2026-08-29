@@ -20,6 +20,7 @@ def _migrate(conn):
         "ALTER TABLE accounts ADD COLUMN iban TEXT",
         "ALTER TABLE accounts ADD COLUMN bank_connection_id TEXT",
         "ALTER TABLE accounts ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE transactions ADD COLUMN recurring_id INTEGER REFERENCES recurring_rules(id)",
     ):
         try:
             conn.execute(stmt)

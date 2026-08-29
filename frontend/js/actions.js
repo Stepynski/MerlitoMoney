@@ -7,7 +7,7 @@ import { PAL } from './constants.js';
 // ---------- mutations (call the API, then reload + render) ----------
 export async function submit() {
   const f = state.form;
-  if (state.modal === 'movement' && !num(f.amount)) { state.modal = null; state.formError = ''; render(); return; }
+  if ((state.modal === 'movement' || state.modal === 'recurring') && !num(f.amount)) { state.modal = null; state.formError = ''; render(); return; }
   try {
     await submitModal(f);
   } catch (e) {
@@ -61,6 +61,31 @@ export async function submitModal(f) {
     };
     await api('/api/transactions', { method: 'POST', body: JSON.stringify(body) });
     state.page = 'balance';
+  } else if (state.modal === 'recurring') {
+    const isTransfer = f.recurMovement === 'Transfer internal';
+    const body = {
+      name: f.name.trim() || 'New recurring',
+      type: f.recurMovement,
+      account_id: f.account,
+      to_account_id: isTransfer && f.toAccount ? f.toAccount : null,
+      category_id: (f.recurMovement === 'Expense' || f.recurMovement === 'Income') ? (f.category || null) : null,
+      amount: num(f.amount),
+      note: f.note && f.note.trim() ? f.note.trim() : null,
+      freq: f.freq,
+      interval_n: Math.max(1, parseInt(f.intervalN, 10) || 1),
+      weekday: f.freq === 'weekly' ? parseInt(f.weekday, 10) : null,
+      day_of_month: (f.freq === 'monthly' || f.freq === 'yearly') ? parseInt(f.dayOfMonth, 10) : null,
+      month_of_year: f.freq === 'yearly' ? parseInt(f.monthOfYear, 10) : null,
+      nth_business_day: f.freq === 'monthly_nth_business_day' ? parseInt(f.nthBusinessDay, 10) : null,
+      weekend_rule: f.freq === 'monthly_nth_business_day' ? 'none' : f.weekendRule,
+      start_date: f.startDate,
+      end_date: f.noEnd ? null : (f.endDate || null)
+    };
+    if (state.editId) {
+      await api('/api/recurring/' + state.editId, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      await api('/api/recurring', { method: 'POST', body: JSON.stringify(body) });
+    }
   }
 }
 export async function deleteCategoryAction() {
@@ -89,6 +114,24 @@ export async function deleteAccountAction() {
 }
 export async function reopenAccount(id) {
   await api('/api/accounts/' + id, { method: 'PATCH', body: JSON.stringify({ active: true }) });
+  await loadAll();
+  render();
+}
+export async function pauseRecurringAction() {
+  await api('/api/recurring/' + state.editId, { method: 'PATCH', body: JSON.stringify({ active: false }) });
+  state.modal = null;
+  await loadAll();
+  render();
+}
+export async function resumeRecurringAction() {
+  await api('/api/recurring/' + state.editId, { method: 'PATCH', body: JSON.stringify({ active: true }) });
+  state.modal = null;
+  await loadAll();
+  render();
+}
+export async function deleteRecurringAction() {
+  await api('/api/recurring/' + state.editId, { method: 'DELETE' });
+  state.modal = null;
   await loadAll();
   render();
 }

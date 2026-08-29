@@ -20,6 +20,28 @@ CREATE TABLE IF NOT EXISTS categories (
     color TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS recurring_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('Expense', 'Income', 'Transfer internal')),
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    to_account_id INTEGER REFERENCES accounts(id),
+    category_id INTEGER REFERENCES categories(id),
+    amount REAL NOT NULL,
+    note TEXT,
+    freq TEXT NOT NULL CHECK (freq IN ('daily', 'weekly', 'monthly', 'yearly', 'monthly_nth_business_day')),
+    interval_n INTEGER NOT NULL DEFAULT 1,
+    weekday INTEGER,
+    day_of_month INTEGER,
+    month_of_year INTEGER,
+    nth_business_day INTEGER,
+    weekend_rule TEXT NOT NULL DEFAULT 'none' CHECK (weekend_rule IN ('none', 'before', 'after')),
+    start_date TEXT NOT NULL,
+    end_date TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    last_generated_date TEXT
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT NOT NULL,
@@ -29,7 +51,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     category_id INTEGER REFERENCES categories(id),
     amount REAL NOT NULL,
     note TEXT,
-    external_id TEXT UNIQUE
+    external_id TEXT UNIQUE,
+    recurring_id INTEGER REFERENCES recurring_rules(id)
 );
 
 CREATE TABLE IF NOT EXISTS budgets (

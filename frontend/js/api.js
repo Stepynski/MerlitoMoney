@@ -9,13 +9,14 @@ export async function api(path, opts) {
 }
 
 export async function loadAll() {
-  const [accounts, cats, budgetRows, tx] = await Promise.all([
-    api('/api/accounts'), api('/api/categories'), api('/api/budgets'), api('/api/transactions')
+  const [accounts, cats, budgetRows, tx, recurring] = await Promise.all([
+    api('/api/accounts'), api('/api/categories'), api('/api/budgets'), api('/api/transactions'), api('/api/recurring')
   ]);
   state.accounts = accounts;
   state.cats = cats;
   state.budgets = {};
   budgetRows.forEach(b => { state.budgets[b.category_id] = b.monthly_limit; });
   state.tx = tx.map(t => Object.assign({}, t, { _date: new Date(t.date) }));
+  state.recurring = recurring;
   if (!state.form.account && accounts.length) state.form.account = accounts[0].id;
 }
