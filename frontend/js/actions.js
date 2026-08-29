@@ -51,7 +51,6 @@ export async function submitModal(f) {
   } else if (state.modal === 'movement') {
     const isTransfer = f.movement === 'Transfer internal';
     const body = {
-      date: new Date().toISOString().slice(0, 10),
       account_id: f.account,
       to_account_id: isTransfer && f.toAccount ? f.toAccount : null,
       type: f.movement,
@@ -59,7 +58,12 @@ export async function submitModal(f) {
       amount: num(f.amount),
       note: f.note && f.note.trim() ? f.note.trim() : null
     };
-    await api('/api/transactions', { method: 'POST', body: JSON.stringify(body) });
+    if (state.editId) {
+      await api('/api/transactions/' + state.editId, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      body.date = new Date().toISOString().slice(0, 10);
+      await api('/api/transactions', { method: 'POST', body: JSON.stringify(body) });
+    }
     state.page = 'balance'; state.balanceTab = 'movements';
   } else if (state.modal === 'recurring') {
     const isTransfer = f.recurMovement === 'Transfer internal';
@@ -135,9 +139,39 @@ export async function deleteRecurringAction() {
   await loadAll();
   render();
 }
+export async function deleteMovementAction() {
+  await api('/api/transactions/' + state.editId, { method: 'DELETE' });
+  state.modal = null;
+  await loadAll();
+  render();
+}
 export async function logoutAction() {
   await api('/api/logout', { method: 'POST' });
   state.authed = false;
   state.modal = null; state.drawerOpen = false;
+  render();
+}
+export async function deleteAllDataAction() {
+  if (state.form.dangerConfirm !== 'DELETE') { state.formError = 'Type DELETE to confirm'; render(); return; }
+  try {
+    await api('/api/danger/delete-all', { method: 'POST', body: JSON.stringify({ password: state.form.dangerPassword }) });
+  } catch (e) {
+    state.formError = 'Wrong password'; render(); return;
+  }
+  state.modal = null; state.formError = '';
+  await loadAll();
+  state.page = 'overview';
+  render();
+}
+export async function changePasswordAction() {
+  const f = state.form;
+  if (f.newPassword.length < 4) { state.formError = 'New password must be at least 4 characters'; render(); return; }
+  if (f.newPassword !== f.confirmNewPassword) { state.formError = 'Passwords do not match'; render(); return; }
+  try {
+    await api('/api/change-password', { method: 'POST', body: JSON.stringify({ current_password: f.currentPassword, new_password: f.newPassword }) });
+  } catch (e) {
+    state.formError = 'Current password is incorrect'; render(); return;
+  }
+  state.modal = null; state.formError = '';
   render();
 }

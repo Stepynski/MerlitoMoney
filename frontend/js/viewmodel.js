@@ -102,7 +102,8 @@ export function openModal(kind, editId, form) {
     name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '',
     icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '',
     recurMovement: 'Expense', freq: 'monthly', intervalN: '1', weekday: '0', dayOfMonth: '1', monthOfYear: '1',
-    nthBusinessDay: '-1', weekendRule: 'none', startDate: new Date().toISOString().slice(0, 10), endDate: '', noEnd: true
+    nthBusinessDay: '-1', weekendRule: 'none', startDate: new Date().toISOString().slice(0, 10), endDate: '', noEnd: true,
+    dangerPassword: '', dangerConfirm: '', currentPassword: '', newPassword: '', confirmNewPassword: ''
   }, form || {});
   render();
 }
@@ -183,6 +184,10 @@ export function computeView() {
     onDelete: () => openModal('deleteAccount', a.id)
   }));
 
+  const editMovement = t => openModal('movement', t.id, {
+    movement: t.type, category: t.category_id || '', amount: money(t.amount).replace(' €', '').trim(),
+    account: t.account_id, toAccount: t.to_account_id || '', note: t.note || ''
+  });
   const editRecurring = r => openModal('recurring', r.id, {
     name: r.name, recurMovement: r.type, account: r.account_id, toAccount: r.to_account_id || '',
     category: r.category_id || '', amount: money(r.amount).replace(' €', '').trim(), note: r.note || '',
@@ -255,7 +260,9 @@ export function computeView() {
       icon: '#' + (c ? c.icon : 'ic-transfer'), color: c ? c.color : GREY,
       account: a ? a.name : '—', accountIcon: '#' + (a ? a.icon : 'ic-wallet'),
       amount: money(isExp ? -t.amount : t.amount, isInc), type: t.type, note: t.note || '',
-      amountColor: isExp ? RED : isInc ? GREEN : GREY
+      amountColor: isExp ? RED : isInc ? GREEN : GREY,
+      onEdit: () => editMovement(t),
+      onDelete: () => openModal('deleteMovement', t.id)
     });
   });
   const dayGroups = groups.map(g => ({
@@ -382,16 +389,20 @@ export function computeView() {
   });
 
   const modalMeta = {
-    movement: ['New movement', 'Save'], account: [s.editId ? 'Edit account' : 'New account', 'Save'],
+    movement: [s.editId ? 'Edit movement' : 'New movement', 'Save'], account: [s.editId ? 'Edit account' : 'New account', 'Save'],
     category: [s.editId ? 'Edit category' : 'New category', 'Apply'],
     budget: [s.editId ? 'Edit budget' : 'Set budget', 'Save'],
     deleteAccount: ['Delete account', ''],
+    deleteMovement: ['Delete movement', ''],
     recurring: [s.editId ? 'Edit recurring' : 'New recurring', 'Save'],
     deleteRecurring: ['Manage recurring rule', ''],
-    settings: ['Settings', '']
+    settings: ['Settings', ''],
+    deleteAllData: ['Delete all data', ''],
+    changePassword: ['Change password', '']
   }[s.modal] || ['', ''];
   const deleteAccountTarget = s.modal === 'deleteAccount' ? acct(s.editId) : null;
   const deleteRecurringTarget = s.modal === 'deleteRecurring' ? s.recurring.find(r => r.id === s.editId) : null;
+  const deleteMovementTarget = s.modal === 'deleteMovement' ? s.tx.find(t => t.id === s.editId) : null;
 
   return {
     isNarrow: s.narrow, isWide: !s.narrow,
@@ -445,6 +456,12 @@ export function computeView() {
     deleteRecurringName: deleteRecurringTarget ? deleteRecurringTarget.name : '',
     deleteRecurringPaused: deleteRecurringTarget ? !deleteRecurringTarget.active : false,
     deleteRecurringTxCount: deleteRecurringTarget ? s.tx.filter(t => t.recurring_id === deleteRecurringTarget.id).length : 0,
+    isDeleteMovementModal: s.modal === 'deleteMovement',
+    deleteMovementTitle: deleteMovementTarget ? (cat(deleteMovementTarget.category_id) ? cat(deleteMovementTarget.category_id).name : (deleteMovementTarget.type.indexOf('Transfer') >= 0 ? 'Transfer' : deleteMovementTarget.type)) : '',
+    deleteMovementAmount: deleteMovementTarget ? money(deleteMovementTarget.type === 'Expense' ? -deleteMovementTarget.amount : deleteMovementTarget.amount, deleteMovementTarget.type === 'Income') : '',
+    isDeleteAllDataModal: s.modal === 'deleteAllData', isChangePasswordModal: s.modal === 'changePassword',
+    formDangerPassword: s.form.dangerPassword, formDangerConfirm: s.form.dangerConfirm,
+    formCurrentPassword: s.form.currentPassword, formNewPassword: s.form.newPassword, formConfirmNewPassword: s.form.confirmNewPassword,
     modalTitle: modalMeta[0], modalCta: modalMeta[1],
     movementTabs: [['Expense', 'Expenses'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
       const on = s.form.movement === t[0];

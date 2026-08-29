@@ -4,7 +4,7 @@ import { THEME_STYLES, THEMES } from './themes.js';
 import { saveThemePref } from './state.js';
 import { RED } from './constants.js';
 import { computeView, set, openModal, shiftPeriod, unbudgeted } from './viewmodel.js';
-import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, logoutAction } from './actions.js';
+import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction } from './actions.js';
 
 // ---------- event delegation ----------
 export let handlers = [];
@@ -75,6 +75,16 @@ export function render() {
   if (ibanInput) ibanInput.addEventListener('input', e => set('iban', e.target.value));
   const noteInput = root.querySelector('#f-note');
   if (noteInput) noteInput.addEventListener('input', e => set('note', e.target.value));
+  const dangerPwInput = root.querySelector('#f-danger-password');
+  if (dangerPwInput) dangerPwInput.addEventListener('input', e => set('dangerPassword', e.target.value));
+  const dangerConfirmInput = root.querySelector('#f-danger-confirm');
+  if (dangerConfirmInput) dangerConfirmInput.addEventListener('input', e => set('dangerConfirm', e.target.value));
+  const curPwInput = root.querySelector('#f-current-password');
+  if (curPwInput) curPwInput.addEventListener('input', e => set('currentPassword', e.target.value));
+  const newPwInput = root.querySelector('#f-new-password');
+  if (newPwInput) newPwInput.addEventListener('input', e => set('newPassword', e.target.value));
+  const confirmPwInput = root.querySelector('#f-confirm-new-password');
+  if (confirmPwInput) confirmPwInput.addEventListener('input', e => set('confirmNewPassword', e.target.value));
   const pwInput = root.querySelector('#f-password');
   if (pwInput) pwInput.focus();
 }
@@ -295,19 +305,23 @@ export function renderApp() {
                 <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${d.netColor}">${d.net}</span>
               </div>
               ${d.items.map(t => `
-                <div style="display:flex;align-items:center;gap:13px;padding:12px 16px;border-bottom:1px solid ${TH.border}">
-                  <span style="width:38px;height:38px;border-radius:50%;background:${t.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="19" height="19"><use href="${t.icon}"></use></svg></span>
-                  <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
-                    <span style="font-weight:600;font-size:14.5px">${t.title}</span>
-                    <span style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:${GREY}">
-                      <svg width="13" height="13"><use href="${t.accountIcon}"></use></svg>${t.account}
+                <div style="display:flex;align-items:center;gap:2px;padding:2px 6px 2px 16px;border-bottom:1px solid ${TH.border}">
+                  <div style="flex:1;min-width:0;display:flex;align-items:center;gap:13px;padding:10px 0">
+                    <span style="width:38px;height:38px;border-radius:50%;background:${t.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="19" height="19"><use href="${t.icon}"></use></svg></span>
+                    <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
+                      <span style="font-weight:600;font-size:14.5px">${t.title}</span>
+                      <span style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:${GREY}">
+                        <svg width="13" height="13"><use href="${t.accountIcon}"></use></svg>${t.account}
+                      </span>
+                      ${t.note ? `<span style="font-size:12.5px;color:${TH.textFaint};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.note)}</span>` : ''}
                     </span>
-                    ${t.note ? `<span style="font-size:12.5px;color:${TH.textFaint};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.note)}</span>` : ''}
-                  </span>
-                  <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none">
-                    <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${t.amountColor}">${t.amount}</span>
-                    <span style="font-size:11.5px;color:${TH.textFaint}">${t.type}</span>
-                  </span>
+                    <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none">
+                      <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${t.amountColor}">${t.amount}</span>
+                      <span style="font-size:11.5px;color:${TH.textFaint}">${t.type}</span>
+                    </span>
+                  </div>
+                  <button data-click="${H(t.onEdit)}" aria-label="Edit movement" style="border:0;background:transparent;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="15" height="15"><use href="#ic-edit"></use></svg></button>
+                  <button data-click="${H(t.onDelete)}" aria-label="Delete movement" style="border:0;background:transparent;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="15" height="15"><use href="#ic-trash"></use></svg></button>
                 </div>`).join('')}
             </div>`).join('')}
           ${V.noRows ? `<div style="padding:44px 20px;text-align:center;color:${GREY}">No movements match these filters.</div>` : ''}
@@ -402,9 +416,9 @@ export function renderApp() {
       ${V.dashboardAccounts.length ? `
       <section style="display:flex;flex-direction:column;gap:8px">
         <span style="font-weight:700;font-size:15px;padding:0 4px">Accounts</span>
-        <div style="display:flex;gap:10px;overflow-x:auto;padding:2px 4px 6px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:2px 4px 6px">
           ${V.dashboardAccounts.map(a => `
-            <button data-click="${H(a.onClick)}" style="flex:none;min-width:128px;background:${TH.surface};border:0;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,0.06);text-align:left">
+            <button data-click="${H(a.onClick)}" style="background:${TH.surface};border:0;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,0.06);text-align:left">
               <span style="width:32px;height:32px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center"><svg width="16" height="16"><use href="${a.icon}"></use></svg></span>
               <span style="font-size:12.5px;color:${GREY};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.name}</span>
               <span style="font-weight:600;font-variant-numeric:tabular-nums;font-size:14px">${a.balance}</span>
@@ -518,7 +532,7 @@ export function renderApp() {
     </div>`;
 
   const main = `<main style="flex:1;width:100%;background:${V.pageTint};transition:background .3s ease">
-    <div style="max-width:1080px;margin:0 auto;padding:14px clamp(10px,2.4vw,20px) 110px;display:flex;flex-direction:column;gap:14px">
+    <div style="max-width:${V.isNarrow ? '1080px' : '1600px'};margin:0 auto;padding:14px clamp(10px,2.4vw,28px) 110px;display:flex;flex-direction:column;gap:14px">
       ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}
     </div>
   </main>`;
@@ -540,6 +554,9 @@ export function renderApp() {
           <span style="font-weight:700;font-size:19px">MerlitoMoney</span>
         </div>
         <div style="padding:14px 16px 4px">${themeSettingsHtml()}</div>
+        <button data-click="${H(() => openModal('settings'))}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px">
+          <svg width="21" height="21" style="color:${GREY}"><use href="#ic-gear"></use></svg>Settings
+        </button>
         ${V.drawerItems.map(d => `
           <button data-click="${H(() => { state.drawerOpen = false; render(); })}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px">
             <svg width="21" height="21" style="color:${GREY}"><use href="${d.icon}"></use></svg>${d.label}
@@ -556,7 +573,7 @@ export function renderApp() {
         <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:${TH.surface2};z-index:2">
           <button data-click="${H(() => { console.log('[mm debug] modal closed via X button, modal was', state.modal); state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
           <span style="font-size:19px;font-weight:700;flex:1">${V.modalTitle}</span>
-          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
+          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal || V.isDeleteMovementModal || V.isDeleteAllDataModal || V.isChangePasswordModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
         </div>
         <div style="padding:0 18px 20px;display:flex;flex-direction:column;gap:14px">
           ${V.isDeleteAccountModal ? `
@@ -567,6 +584,16 @@ export function renderApp() {
               <button data-click="${H(() => closeAccountAction())}" style="border:1px solid ${TH.border};background:${TH.surface};color:${TH.text};border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Close account — keep history</button>
               <button data-click="${H(() => deleteAccountAction())}" style="border:0;background:${TH.surface};color:${RED};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
                 <svg width="18" height="18"><use href="#ic-trash"></use></svg>Delete account &amp; all movements
+              </button>
+            </div>` : ''}
+
+          ${V.isDeleteMovementModal ? `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <p style="margin:0;font-size:14px;color:${GREY};line-height:1.5">
+                Delete <strong style="color:${TH.text}">${esc(V.deleteMovementTitle)}</strong> (<strong style="color:${TH.text}">${V.deleteMovementAmount}</strong>)? This cannot be undone.
+              </p>
+              <button data-click="${H(() => deleteMovementAction())}" style="border:0;background:${TH.surface};color:${RED};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                <svg width="18" height="18"><use href="#ic-trash"></use></svg>Delete movement
               </button>
             </div>` : ''}
           ${V.isMovementModal ? `
@@ -787,6 +814,16 @@ export function renderApp() {
 
           ${V.isSettingsModal ? `
             ${themeSettingsHtml()}
+            <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em;padding:2px 2px 0">Profile</span>
+            <div style="display:flex;flex-direction:column;gap:2px;background:${TH.surface};border-radius:14px;overflow:hidden">
+              <button data-click="${H(() => openModal('changePassword', null, { currentPassword: '', newPassword: '', confirmNewPassword: '' }))}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+                <svg width="20" height="20" style="color:${GREY}"><use href="#ic-gear"></use></svg>Change password
+              </button>
+              <button data-click="${H(() => logoutAction())}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+                <svg width="20" height="20" style="color:${GREY}"><use href="#ic-close"></use></svg>Log out
+              </button>
+            </div>
+            <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em;padding:2px 2px 0">Data</span>
             <div style="display:flex;flex-direction:column;gap:2px;background:${TH.surface};border-radius:14px;overflow:hidden">
               <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
                 <svg width="20" height="20" style="color:${GREY}"><use href="#ic-db"></use></svg>Data
@@ -794,12 +831,45 @@ export function renderApp() {
               <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
                 <svg width="20" height="20" style="color:${GREY}"><use href="#ic-refresh"></use></svg>Backups
               </button>
-              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
                 <svg width="20" height="20" style="color:${GREY}"><use href="#ic-info"></use></svg>About
               </button>
-              <button data-click="${H(() => logoutAction())}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${RED}">
-                <svg width="20" height="20"><use href="#ic-close"></use></svg>Log out
+            </div>
+            <span style="font-size:12px;font-weight:600;color:${RED};text-transform:uppercase;letter-spacing:0.06em;padding:2px 2px 0">Danger zone</span>
+            <div style="background:${TH.surface};border-radius:14px;overflow:hidden">
+              <button data-click="${H(() => openModal('deleteAllData', null, { dangerPassword: '', dangerConfirm: '' }))}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${RED}">
+                <svg width="20" height="20"><use href="#ic-trash"></use></svg>Delete all data
               </button>
+            </div>` : ''}
+
+          ${V.isChangePasswordModal ? `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Current password
+                <input id="f-current-password" type="password" value="${esc(V.formCurrentPassword)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">New password
+                <input id="f-new-password" type="password" value="${esc(V.formNewPassword)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Confirm new password
+                <input id="f-confirm-new-password" type="password" value="${esc(V.formConfirmNewPassword)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+              </label>
+              ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
+              <button data-click="${H(() => changePasswordAction())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Save new password</button>
+            </div>` : ''}
+
+          ${V.isDeleteAllDataModal ? `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <p style="margin:0;font-size:14px;color:${GREY};line-height:1.5">
+                This permanently deletes every account, category, movement, budget, and recurring rule. This cannot be undone. Your login password is not affected.
+              </p>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Password
+                <input id="f-danger-password" type="password" value="${esc(V.formDangerPassword)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Type DELETE to confirm
+                <input id="f-danger-confirm" value="${esc(V.formDangerConfirm)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+              </label>
+              ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
+              <button data-click="${H(() => deleteAllDataAction())}" style="border:0;background:${RED};color:#fff;border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Permanently delete everything</button>
             </div>` : ''}
         </div>
       </div>
