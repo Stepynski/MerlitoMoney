@@ -525,7 +525,19 @@ export function computeView() {
       }
       const lastDate = points[points.length - 1].date;
       return { start, end: lastDate > end ? lastDate : end, points };
+    }).filter(ls => {
+      // A garbage rate/term on one account (e.g. a stray decimal-separator
+      // typo landing an interest rate in the millions of percent) can blow
+      // amortizedPaymentJs() up to Infinity, which turns every later point
+      // in that loan's own series into NaN. Since every active loan shares
+      // one y-scale below, a single contaminated series would otherwise
+      // blank the combined chart for every loan, not just the bad one — so
+      // drop just that account's series here instead.
+      const ok = ls.points.every(p => Number.isFinite(p.owed) && Number.isFinite(p.interestCum));
+      if (!ok) console.warn('[mm debug] excluding a loan account from the payoff projection — its rate/term produced non-finite values', ls);
+      return ok;
     });
+    if (loanSeries.length) {
     const overallStart = new Date(Math.min(...loanSeries.map(ls => +ls.start)));
     const overallEnd = new Date(Math.max(...loanSeries.map(ls => +ls.end), +today));
     const span = Math.max(1, +overallEnd - +overallStart);
@@ -576,6 +588,7 @@ export function computeView() {
       todayX: todayX.toFixed(2),
       labels: lpLabels
     };
+    }
   }
 
   const dashboardAccounts = accountGroups.flatMap(g => g.items);
