@@ -9,15 +9,24 @@ import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, d
 // ---------- event delegation ----------
 export let handlers = [];
 export function H(fn) { handlers.push(fn); return handlers.length - 1; }
-export function wire(root) {
-  root.querySelectorAll('[data-click]').forEach(el => {
-    el.addEventListener('click', e => { handlers[+el.dataset.click](e); });
+
+// One listener per event type, attached once to the stable #root element
+// (only its children are ever replaced, via innerHTML — #root itself never
+// is). The previous approach re-attached a fresh listener to every matching
+// element on every render; when a click's own handler replaced the whole
+// DOM mid-bubble (e.g. closing a modal), the still-bubbling event could
+// reach a handler on a freshly-rendered element it was never meant to hit —
+// this is what caused closing the "add account" modal to also trigger the
+// Overview nav button underneath it. A single delegated listener on a node
+// that's never itself torn down avoids that whole failure class.
+export function wireOnce(root) {
+  root.addEventListener('click', e => {
+    const el = e.target.closest('[data-click]');
+    if (el) handlers[+el.dataset.click](e);
   });
-  root.querySelectorAll('[data-change]').forEach(el => {
-    el.addEventListener('change', e => { handlers[+el.dataset.change](e); });
-  });
-  root.querySelectorAll('[data-input]').forEach(el => {
-    el.addEventListener('input', e => { handlers[+el.dataset.input](e); });
+  root.addEventListener('change', e => {
+    const el = e.target.closest('[data-change]');
+    if (el) handlers[+el.dataset.change](e);
   });
 }
 export function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -52,7 +61,6 @@ export function render() {
   handlers = [];
   const root = document.getElementById('root');
   root.innerHTML = state.authed ? renderApp() : renderLogin();
-  wire(root);
   const amountInput = root.querySelector('#f-amount');
   if (amountInput) amountInput.addEventListener('input', e => set('amount', e.target.value));
   const nameInput = root.querySelector('#f-name');

@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { api, loadAll } from './api.js';
-import { render } from './render.js';
+import { render, wireOnce } from './render.js';
 
 // ---------- bootstrap ----------
 async function boot() {
@@ -9,11 +9,13 @@ async function boot() {
     const me = await api('/api/me');
     if (me.authed) { state.authed = true; await loadAll(); }
   } catch (e) { /* ignore */ }
+  const root = document.getElementById('root');
+  wireOnce(root);
   render();
 
   window.matchMedia('(max-width: 859px)').addEventListener('change', e => { state.narrow = e.matches; render(); });
 
-  document.getElementById('root').addEventListener('submit', async e => {
+  root.addEventListener('submit', async e => {
     if (e.target.id === 'login-form') {
       e.preventDefault();
       const pw = document.getElementById('f-password').value;
