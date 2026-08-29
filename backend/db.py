@@ -11,6 +11,20 @@ SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA_PATH.read_text())
+        _migrate(conn)
+
+
+def _migrate(conn):
+    """Additive column migrations for databases created before a schema change."""
+    for stmt in (
+        "ALTER TABLE accounts ADD COLUMN iban TEXT",
+        "ALTER TABLE accounts ADD COLUMN bank_connection_id TEXT",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass  # column already exists
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_iban ON accounts(iban) WHERE iban IS NOT NULL")
 
 
 @contextmanager

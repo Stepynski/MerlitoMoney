@@ -126,10 +126,10 @@ const state = {
   page: 'overview', mode: 'month', anchor: new Date(), view: 'expenses',
   fAccounts: [], fTypes: [], fCats: [], filtersOpen: false,
   narrow: window.matchMedia('(max-width: 859px)').matches,
-  drawerOpen: false, modal: null, editId: null,
+  drawerOpen: false, modal: null, editId: null, formError: '',
   themeStyle: loadThemePref('mm_theme_style', 'colorful'),
   themeMode: loadThemePref('mm_theme_mode', window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
-  form: { name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense' }
+  form: { name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '' }
 };
 
 // ---------- api ----------
@@ -220,14 +220,28 @@ function toggle(key, id) {
   state[key] = arr.indexOf(id) < 0 ? arr.concat([id]) : arr.filter(x => x !== id);
 }
 function openModal(kind, editId, form) {
-  state.modal = kind; state.editId = editId || null; state.drawerOpen = false;
-  state.form = Object.assign({ name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense' }, form || {});
+  state.modal = kind; state.editId = editId || null; state.drawerOpen = false; state.formError = '';
+  state.form = Object.assign({ name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '' }, form || {});
   render();
 }
 
 // ---------- mutations (call the API, then reload + render) ----------
 async function submit() {
   const f = state.form;
+  if (state.modal === 'movement' && !num(f.amount)) { state.modal = null; state.formError = ''; render(); return; }
+  try {
+    await submitModal(f);
+  } catch (e) {
+    state.formError = e.message || 'Something went wrong';
+    render();
+    return;
+  }
+  state.modal = null;
+  state.formError = '';
+  await loadAll();
+  render();
+}
+async function submitModal(f) {
   if (state.modal === 'account') {
     const isSave = f.kind === 'save';
     const body = {
@@ -237,7 +251,8 @@ async function submit() {
       color: isSave ? '#40c057' : PAL[state.accounts.length % PAL.length],
       grp: isSave ? 'save' : 'spend',
       starting_balance: num(f.balance),
-      goal_amount: isSave && num(f.goal) > 0 ? num(f.goal) : null
+      goal_amount: isSave && num(f.goal) > 0 ? num(f.goal) : null,
+      iban: f.iban ? f.iban.trim() : null
     };
     await api('/api/accounts', { method: 'POST', body: JSON.stringify(body) });
   } else if (state.modal === 'budget') {
@@ -250,8 +265,6 @@ async function submit() {
       await api('/api/categories', { method: 'POST', body: JSON.stringify({ name: f.name.trim() || 'New category', kind: f.kind === 'income' ? 'income' : 'expense', icon: f.icon, color: f.color }) });
     }
   } else if (state.modal === 'movement') {
-    const amt = num(f.amount);
-    if (!amt) { state.modal = null; render(); return; }
     const isTransfer = f.movement === 'Transfer internal';
     const body = {
       date: new Date().toISOString().slice(0, 10),
@@ -259,14 +272,11 @@ async function submit() {
       to_account_id: isTransfer && f.toAccount ? f.toAccount : null,
       type: f.movement,
       category_id: (f.movement === 'Expense' || f.movement === 'Income') ? (f.category || null) : null,
-      amount: amt
+      amount: num(f.amount)
     };
     await api('/api/transactions', { method: 'POST', body: JSON.stringify(body) });
     state.page = 'balance';
   }
-  state.modal = null;
-  await loadAll();
-  render();
 }
 async function deleteCategoryAction() {
   await api('/api/categories/' + state.editId, { method: 'DELETE' });
@@ -619,6 +629,8 @@ function computeView() {
       ring: s.form.kind === k[0] ? ACCENT : TH.border, dot: s.form.kind === k[0] ? ACCENT : 'transparent'
     })),
     isSavingsKind: s.form.kind === 'save',
+    showIban: s.form.kind === 'save' || s.form.type === 'Bank',
+    formIban: s.form.iban, formError: s.formError,
     formName: s.form.name, formType: s.form.type, formBalance: s.form.balance, formGoal: s.form.goal,
     formColor: s.form.color, formIconRef: '#' + s.form.icon,
     iconChoices: ICONS.map(i => ({
@@ -657,6 +669,8 @@ function render() {
   if (goalInput) goalInput.addEventListener('input', e => set('goal', e.target.value));
   const limitInput = root.querySelector('#f-limit');
   if (limitInput) limitInput.addEventListener('input', e => set('limit', e.target.value));
+  const ibanInput = root.querySelector('#f-iban');
+  if (ibanInput) ibanInput.addEventListener('input', e => set('iban', e.target.value));
   const pwInput = root.querySelector('#f-password');
   if (pwInput) pwInput.focus();
 }
@@ -1153,6 +1167,11 @@ function renderApp() {
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Savings goal
                   <input id="f-goal" value="${esc(V.formGoal)}" placeholder="10.000" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>` : ''}
+              ${V.showIban ? `
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">IBAN (optional)
+                  <input id="f-iban" value="${esc(V.formIban)}" placeholder="NL91 ABNA 0417 1643 00" autocapitalize="characters" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+                </label>` : ''}
+              ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
             </div>` : ''}
 
           ${V.isCatModal ? `

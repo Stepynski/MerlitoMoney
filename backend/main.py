@@ -1,5 +1,6 @@
 import os
 import secrets
+import sqlite3
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from auth import check_password, ensure_password_seeded
 from db import get_conn, init_db, rows_to_dicts
+from iban import is_valid_iban, normalize_iban
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -80,6 +82,7 @@ class AccountIn(BaseModel):
     grp: str
     starting_balance: float = 0
     goal_amount: Optional[float] = None
+    iban: Optional[str] = None
 
 
 class AccountPatch(BaseModel):
@@ -90,6 +93,17 @@ class AccountPatch(BaseModel):
     grp: Optional[str] = None
     starting_balance: Optional[float] = None
     goal_amount: Optional[float] = None
+    iban: Optional[str] = None
+    bank_connection_id: Optional[str] = None
+
+
+def _clean_iban(raw: Optional[str]) -> Optional[str]:
+    if raw is None or not raw.strip():
+        return None
+    iban = normalize_iban(raw)
+    if not is_valid_iban(iban):
+        raise HTTPException(status_code=400, detail="Invalid IBAN")
+    return iban
 
 
 def _account_balances(conn) -> dict:
@@ -122,12 +136,16 @@ def list_accounts(request: Request):
 @app.post("/api/accounts")
 def create_account(body: AccountIn, request: Request):
     require_auth(request)
+    iban = _clean_iban(body.iban)
     with get_conn() as conn:
-        cur = conn.execute(
-            "INSERT INTO accounts (name, type, icon, color, grp, starting_balance, goal_amount) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (body.name, body.type, body.icon, body.color, body.grp, body.starting_balance, body.goal_amount),
-        )
+        try:
+            cur = conn.execute(
+                "INSERT INTO accounts (name, type, icon, color, grp, starting_balance, goal_amount, iban) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (body.name, body.type, body.icon, body.color, body.grp, body.starting_balance, body.goal_amount, iban),
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=400, detail="This IBAN is already used by another account")
         return {"id": cur.lastrowid}
 
 
@@ -135,14 +153,19 @@ def create_account(body: AccountIn, request: Request):
 def update_account(account_id: int, body: AccountPatch, request: Request):
     require_auth(request)
     fields = {k: v for k, v in body.dict().items() if v is not None}
+    if "iban" in fields:
+        fields["iban"] = _clean_iban(fields["iban"])
     if not fields:
         return {"ok": True}
     with get_conn() as conn:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
-        conn.execute(
-            f"UPDATE accounts SET {set_clause} WHERE id = ?",
-            (*fields.values(), account_id),
-        )
+        try:
+            conn.execute(
+                f"UPDATE accounts SET {set_clause} WHERE id = ?",
+                (*fields.values(), account_id),
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=400, detail="This IBAN is already used by another account")
     return {"ok": True}
 
 

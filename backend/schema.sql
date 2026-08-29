@@ -6,7 +6,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     color TEXT NOT NULL,
     grp TEXT NOT NULL CHECK (grp IN ('spend', 'save')),
     starting_balance REAL NOT NULL DEFAULT 0,
-    goal_amount REAL
+    goal_amount REAL,
+    iban TEXT,
+    bank_connection_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS categories (
