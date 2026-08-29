@@ -9,8 +9,12 @@ export async function api(path, opts) {
 }
 
 export async function loadAll() {
-  const [accounts, cats, budgetRows, tx, recurring] = await Promise.all([
-    api('/api/accounts'), api('/api/categories'), api('/api/budgets'), api('/api/transactions'), api('/api/recurring')
+  const [accounts, cats, budgetRows, tx, recurring, staged, feeds] = await Promise.all([
+    api('/api/accounts'), api('/api/categories'), api('/api/budgets'), api('/api/transactions'), api('/api/recurring'),
+    // Reloading the queue alongside everything else is what keeps its
+    // duplicate suggestions honest: entering a movement by hand re-runs the
+    // match against what the ledger now holds.
+    api('/api/import/staged'), api('/api/import/feeds')
   ]);
   state.accounts = accounts;
   state.cats = cats;
@@ -18,5 +22,11 @@ export async function loadAll() {
   budgetRows.forEach(b => { state.budgets[b.category_id] = b.monthly_limit; });
   state.tx = tx.map(t => Object.assign({}, t, { _date: new Date(t.date) }));
   state.recurring = recurring;
+  // Defensive: an import page that renders empty is a far better failure than
+  // one that takes the whole app down, and these two are the only collections
+  // served by endpoints a stale cached build might not know about.
+  state.staged = Array.isArray(staged) ? staged : [];
+  state.feeds = feeds && Array.isArray(feeds.feeds) ? feeds.feeds : [];
+  state.connections = feeds && Array.isArray(feeds.connections) ? feeds.connections : [];
   if (!state.form.account && accounts.length) state.form.account = accounts[0].id;
 }

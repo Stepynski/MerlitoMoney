@@ -282,6 +282,59 @@ export async function refreshSwStatus() {
   state.swInfo = info;
   render();
 }
+// ---------- bank import review ----------
+
+export async function setStagedField(id, patch) {
+  await api('/api/import/staged/' + id, { method: 'PATCH', body: JSON.stringify(patch) });
+  const row = state.staged.find(r => r.id === id);
+  if (row) Object.assign(row, patch);
+  render();
+}
+
+export function decideStaged(id, decision) {
+  // Clicking the decision already showing clears it, so a row can always be
+  // put back to undecided rather than being stuck once touched.
+  const row = state.staged.find(r => r.id === id);
+  const next = row && row.decision === decision ? 'pending' : decision;
+  return setStagedField(id, { decision: next });
+}
+
+export async function commitImportAction() {
+  state.importBusy = true; state.importMsg = ''; render();
+  try {
+    const res = await api('/api/import/commit', { method: 'POST' });
+    state.importMsg = `Imported ${res.imported}, linked ${res.linked}, skipped ${res.skipped}.`;
+  } catch (e) {
+    try { state.importMsg = JSON.parse(e.message).detail; } catch (_) { state.importMsg = 'Import failed'; }
+  }
+  state.importBusy = false;
+  await loadAll();
+  render();
+}
+
+export async function cancelImportAction() {
+  state.importBusy = true; render();
+  try {
+    const res = await api('/api/import/cancel', { method: 'POST' });
+    state.importMsg = `Discarded ${res.discarded} row${res.discarded === 1 ? '' : 's'}. Nothing was imported.`;
+  } catch (e) { state.importMsg = 'Could not clear the queue'; }
+  state.importBusy = false;
+  await loadAll();
+  render();
+}
+
+export async function mapFeedAction(uuid, accountId) {
+  await api('/api/import/feeds/' + uuid, { method: 'PATCH', body: JSON.stringify({ account_id: accountId || null }) });
+  await loadAll();
+  render();
+}
+
+export async function toggleFeedSyncAction(uuid, enabled) {
+  await api('/api/import/feeds/' + uuid, { method: 'PATCH', body: JSON.stringify({ sync_enabled: enabled }) });
+  await loadAll();
+  render();
+}
+
 export function openAboutModal() {
   state.swInfo = null;
   openModal('about');

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from auth import check_password, ensure_password_seeded, hash_password
+from bankimport import StaleLinkError, commit_staged, refresh_matches, stage_rows
 from db import ensure_default_categories, get_conn, init_db, rows_to_dicts
 from iban import is_valid_iban, normalize_iban
 from datetime import date, datetime
@@ -118,6 +119,11 @@ def delete_all_data(body: DeleteAllDataIn, request: Request):
         # Delete in FK-dependency order: transactions reference accounts/
         # categories/recurring_rules, recurring_rules reference accounts,
         # budgets reference categories.
+        conn.execute("DELETE FROM import_staging")
+        conn.execute("DELETE FROM import_ledger")
+        conn.execute("DELETE FROM payee_rules")
+        conn.execute("DELETE FROM bank_feeds")
+        conn.execute("DELETE FROM bank_connections")
         conn.execute("DELETE FROM transactions")
         conn.execute("DELETE FROM recurring_rules")
         conn.execute("DELETE FROM budgets")
@@ -301,6 +307,12 @@ def delete_account(account_id: int, request: Request):
         # transaction touching this account (either side of a transfer) must
         # go first, or the DELETE below fails under PRAGMA foreign_keys = ON.
         conn.execute("DELETE FROM transactions WHERE account_id = ? OR to_account_id = ?", (account_id, account_id))
+        # Anything staged for this account is unreviewed bank data with nowhere
+        # left to land, so it goes; the bank feed itself is kept but unlinked,
+        # because its import history in import_ledger is still worth having if
+        # the account is ever recreated.
+        conn.execute("DELETE FROM import_staging WHERE account_id = ? OR to_account_id = ?", (account_id, account_id))
+        conn.execute("UPDATE bank_feeds SET account_id = NULL, sync_enabled = 0 WHERE account_id = ?", (account_id,))
         conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
     return {"ok": True}
 
@@ -473,6 +485,9 @@ def delete_category(category_id: int, request: Request):
     require_auth(request)
     with get_conn() as conn:
         conn.execute("DELETE FROM budgets WHERE category_id = ?", (category_id,))
+        # Staged rows and remembered payees point at categories too; clear the
+        # suggestion rather than let it block the delete.
+        conn.execute("UPDATE import_staging SET category_id = NULL WHERE category_id = ?", (category_id,))
         conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
     return {"ok": True}
 
@@ -707,7 +722,17 @@ def delete_recurring(recurring_id: int, request: Request):
 
 # Parent tables before children, matching FK direction — reused for both
 # insert order (on restore) and to know which tables round-trip at all.
-BACKUP_TABLES = ["categories", "accounts", "recurring_rules", "transactions", "budgets"]
+#
+# import_ledger and payee_rules belong here as much as the ledger itself does:
+# they are what stops an already-decided bank transaction being imported a
+# second time, and what remembers how each payee is categorised. Restoring a
+# backup without them would silently re-offer every transaction ever imported.
+# import_staging is deliberately absent — it holds unreviewed bank data that is
+# meaningless once the accounts around it have been replaced.
+BACKUP_TABLES = [
+    "categories", "accounts", "recurring_rules", "transactions", "budgets",
+    "bank_connections", "bank_feeds", "payee_rules", "import_ledger",
+]
 
 
 @app.get("/api/export/transactions.csv")
@@ -773,6 +798,9 @@ def import_backup(body: BackupImportIn, request: Request):
         raise HTTPException(status_code=400, detail="This doesn't look like a MerlitoMoney backup file")
     with get_conn() as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
+        # Unreviewed bank rows describe accounts that are about to be replaced,
+        # so they cannot meaningfully survive a restore.
+        conn.execute("DELETE FROM import_staging")
         # Wipe children before parents (same order as /api/danger/delete-all),
         # then restore parents before children so FKs are always satisfied.
         for t in reversed(BACKUP_TABLES):
@@ -799,6 +827,169 @@ def import_backup(body: BackupImportIn, request: Request):
         if bad:
             raise HTTPException(status_code=400, detail="Backup file failed referential integrity checks — nothing was changed")
     return {"ok": True}
+
+
+# ---------- bank import ----------
+
+class BankFeedIn(BaseModel):
+    uuid: str
+    name: Optional[str] = None
+    iban: Optional[str] = None
+    currency: Optional[str] = None
+    connection_id: Optional[int] = None
+    account_id: Optional[int] = None
+
+
+class BankFeedPatch(BaseModel):
+    account_id: Optional[int] = None
+    sync_enabled: Optional[bool] = None
+    retired: Optional[bool] = None
+
+
+@app.get("/api/import/feeds")
+def list_bank_feeds(request: Request):
+    require_auth(request)
+    with get_conn() as conn:
+        feeds = rows_to_dicts(conn.execute("SELECT * FROM bank_feeds ORDER BY name, uuid").fetchall())
+        connections = rows_to_dicts(conn.execute("SELECT * FROM bank_connections ORDER BY id").fetchall())
+    return {"feeds": feeds, "connections": connections}
+
+
+@app.post("/api/import/feeds")
+def upsert_bank_feed(body: BankFeedIn, request: Request):
+    require_auth(request)
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO bank_feeds (uuid, connection_id, account_id, iban, name, currency) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(uuid) DO UPDATE SET "
+            "connection_id = COALESCE(excluded.connection_id, connection_id), "
+            "iban = COALESCE(excluded.iban, iban), name = COALESCE(excluded.name, name), "
+            "currency = COALESCE(excluded.currency, currency)",
+            (body.uuid, body.connection_id, body.account_id, body.iban, body.name, body.currency),
+        )
+    return {"ok": True}
+
+
+@app.patch("/api/import/feeds/{feed_uuid}")
+def update_bank_feed(feed_uuid: str, body: BankFeedPatch, request: Request):
+    require_auth(request)
+    fields = body.dict(exclude_unset=True)
+    if not fields:
+        return {"ok": True}
+    with get_conn() as conn:
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE bank_feeds SET {set_clause} WHERE uuid = ?", (*fields.values(), feed_uuid))
+    return {"ok": True}
+
+
+class StageRowIn(BaseModel):
+    feed_uuid: str
+    booking_date: str
+    amount: float
+    direction: str
+    entry_reference: Optional[str] = None
+    value_date: Optional[str] = None
+    currency: Optional[str] = None
+    counterparty_name: Optional[str] = None
+    counterparty_iban: Optional[str] = None
+    remittance: Optional[str] = None
+    status: Optional[str] = None
+    raw: Optional[dict] = None
+
+
+class StageIn(BaseModel):
+    rows: list
+
+
+@app.post("/api/import/stage")
+def stage_bank_rows(body: StageIn, request: Request):
+    require_auth(request)
+    rows = []
+    for raw in body.rows:
+        row = StageRowIn(**raw).dict()
+        if row["direction"] not in ("in", "out"):
+            raise HTTPException(status_code=400, detail="direction must be 'in' or 'out'")
+        rows.append(row)
+    with get_conn() as conn:
+        return stage_rows(conn, rows)
+
+
+@app.get("/api/import/staged")
+def list_staged(request: Request):
+    require_auth(request)
+    with get_conn() as conn:
+        # Suggestions are recomputed on every read rather than frozen at fetch
+        # time, so a queue left open while the user keeps entering movements by
+        # hand still reflects what the ledger holds now.
+        refresh_matches(conn)
+        rows = rows_to_dicts(
+            conn.execute("SELECT * FROM import_staging ORDER BY booking_date DESC, id").fetchall()
+        )
+        # The suggested duplicate is shown side by side with the bank row, so
+        # the user can judge the suggestion instead of trusting it.
+        for row in rows:
+            row["match"] = None
+            if row["match_tx_id"]:
+                hit = conn.execute(
+                    "SELECT t.id, t.date, t.type, t.amount, t.note, c.name AS category "
+                    "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id WHERE t.id = ?",
+                    (row["match_tx_id"],),
+                ).fetchone()
+                row["match"] = dict(hit) if hit else None
+    return rows
+
+
+class StagedPatch(BaseModel):
+    decision: Optional[str] = None
+    tx_type: Optional[str] = None
+    category_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    note: Optional[str] = None
+
+
+@app.patch("/api/import/staged/{staged_id}")
+def update_staged(staged_id: int, body: StagedPatch, request: Request):
+    require_auth(request)
+    fields = body.dict(exclude_unset=True)
+    if not fields:
+        return {"ok": True}
+    if fields.get("decision") not in (None, "pending", "import", "skip", "link"):
+        raise HTTPException(status_code=400, detail="Unknown decision")
+    if fields.get("decision") == "link":
+        with get_conn() as conn:
+            row = conn.execute("SELECT match_tx_id FROM import_staging WHERE id = ?", (staged_id,)).fetchone()
+        if not row or not row["match_tx_id"]:
+            raise HTTPException(status_code=400, detail="Nothing to link this to")
+    with get_conn() as conn:
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE import_staging SET {set_clause} WHERE id = ?", (*fields.values(), staged_id))
+    return {"ok": True}
+
+
+@app.post("/api/import/commit")
+def commit_import(request: Request):
+    require_auth(request)
+    try:
+        with get_conn() as conn:
+            return commit_staged(conn)
+    except StaleLinkError as e:
+        # The exception escapes get_conn() before it commits, so SQLite rolls
+        # the whole thing back — nothing is half-imported.
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/api/import/cancel")
+def cancel_import(request: Request):
+    """Throw the whole queue away without importing anything.
+
+    Deliberately leaves no trace in import_ledger: cancelling means the user
+    has not decided, so the same rows should turn up again on the next sync.
+    """
+    require_auth(request)
+    with get_conn() as conn:
+        cur = conn.execute("DELETE FROM import_staging")
+    return {"discarded": cur.rowcount}
 
 
 # ---------- static frontend (mounted last so /api/* takes priority) ----------

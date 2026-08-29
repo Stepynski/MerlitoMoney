@@ -4,7 +4,7 @@ import { THEME_STYLES, THEMES } from './themes.js';
 import { saveThemePref } from './state.js';
 import { RED } from './constants.js';
 import { computeView, set, openModal, shiftPeriod, unbudgeted } from './viewmodel.js';
-import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction, downloadTransactionsCsv, downloadBackup, pickBackupFile, restoreBackupAction, openAboutModal } from './actions.js';
+import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction, downloadTransactionsCsv, downloadBackup, pickBackupFile, restoreBackupAction, openAboutModal, commitImportAction, cancelImportAction } from './actions.js';
 
 // ---------- event delegation ----------
 export let handlers = [];
@@ -603,14 +603,96 @@ export function renderApp() {
       </section>
     </div>`;
 
+  const importPage = !V.isImport ? '' : `
+    <div style="display:flex;flex-direction:column;gap:14px;animation:kb-up .25s ease both">
+      ${V.importMsg ? `
+        <div style="background:${TH.surface};border-radius:16px;padding:14px 16px;font-size:14px;border-left:4px solid ${ACCENT}">${esc(V.importMsg)}</div>` : ''}
+
+      <section style="background:${TH.surface};border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+        <div style="font-weight:700;font-size:16px;margin-bottom:4px">Bank accounts</div>
+        <div style="font-size:13px;color:${GREY};line-height:1.5;margin-bottom:${V.noFeeds ? '0' : '14px'}">
+          ${V.noFeeds
+            ? 'No bank is connected yet. Once a bank is linked, each account it reports shows up here to be matched with one of your own accounts.'
+            : 'Each account your bank reports has to point at one of your own accounts before its transactions can be reviewed.'}
+        </div>
+        ${V.importFeeds.map(f => `
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid ${TH.border};flex-wrap:wrap">
+            <div style="flex:1;min-width:160px">
+              <div style="font-weight:600;font-size:14px">${esc(f.name)}</div>
+              ${f.iban ? `<div style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${esc(f.iban)}</div>` : ''}
+            </div>
+            <select data-change="${H(f.onMap)}" style="border:1px solid ${TH.border};border-radius:10px;padding:8px 10px;background:${TH.surface};cursor:pointer;font-size:13.5px">
+              ${f.accountOptions.map(o => `<option value="${o.v}" ${o.v === f.mappedTo ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+            </select>
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:${GREY}">
+              <input type="checkbox" data-change="${H(f.onToggleSync)}" ${f.syncEnabled ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer">Sync
+            </label>
+          </div>`).join('')}
+      </section>
+
+      ${V.noStaged ? `
+        <section style="background:${TH.surface};border-radius:16px;padding:44px 20px;text-align:center;color:${GREY};box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+          Nothing waiting to be reviewed. Transactions fetched from your bank land here first — nothing reaches your accounts until you say so.
+        </section>` : `
+        <section style="background:${TH.surface};border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="flex:1;min-width:150px">
+              <div style="font-weight:700;font-size:16px">${V.stagedPending} to review</div>
+              <div style="font-size:12.5px;color:${GREY}">${V.stagedReady} decided${V.stagedFlagged ? ` · ${V.stagedFlagged} look like duplicates` : ''}</div>
+            </div>
+            <button data-click="${H(() => cancelImportAction())}" ${V.importBusy ? 'disabled' : ''} style="border:1px solid ${TH.border};background:transparent;color:${RED};border-radius:12px;padding:9px 15px;cursor:pointer;font-weight:600;font-size:13.5px">Discard all</button>
+            <button data-click="${H(() => commitImportAction())}" ${V.importBusy || !V.stagedReady ? 'disabled' : ''} style="border:0;background:${V.stagedReady ? ACCENT : TH.border};color:#fff;border-radius:12px;padding:10px 17px;cursor:${V.stagedReady ? 'pointer' : 'default'};font-weight:600;font-size:13.5px">Apply ${V.stagedReady || ''} decision${V.stagedReady === 1 ? '' : 's'}</button>
+          </div>
+        </section>
+
+        <section style="background:${TH.surface};border-radius:16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);overflow:hidden">
+          ${V.importRows.map(r => `
+            <div style="padding:14px 16px;border-bottom:1px solid ${TH.border};display:flex;flex-direction:column;gap:10px;${r.decided ? 'background:' + TH.accentSoft + '33' : ''}">
+              <div style="display:flex;align-items:flex-start;gap:12px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-weight:600;font-size:14.5px">${esc(r.title)}</div>
+                  <div style="font-size:12.5px;color:${GREY};display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                    <span style="font-variant-numeric:tabular-nums">${r.date}</span>
+                    <span>·</span>
+                    <svg width="13" height="13"><use href="${r.accountIcon}"></use></svg>
+                    <span>${esc(r.account)}</span>
+                    <span>·</span>
+                    <span>${esc(r.typeLabel)}</span>
+                  </div>
+                  ${r.detail ? `<div style="font-size:12px;color:${GREY};margin-top:2px">${esc(r.detail)}</div>` : ''}
+                </div>
+                <span style="font-weight:700;font-variant-numeric:tabular-nums;color:${r.amountColor};white-space:nowrap">${r.amount}</span>
+              </div>
+
+              ${r.pairNote ? `<div style="font-size:12.5px;color:${GREY};background:${TH.surface2};border-radius:10px;padding:8px 10px">${esc(r.pairNote)}</div>` : ''}
+
+              ${r.hasMatch ? `
+                <div style="border:1px solid ${RED}55;background:${RED}0f;border-radius:10px;padding:9px 11px">
+                  <div style="font-size:12.5px;font-weight:600;color:${RED};margin-bottom:2px">You may already have this one</div>
+                  <div style="font-size:12.5px">${esc(r.matchText)}</div>
+                  ${r.matchReason ? `<div style="font-size:11.5px;color:${GREY};margin-top:3px">${esc(r.matchReason)}</div>` : ''}
+                </div>` : ''}
+
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                ${r.buttons.map(b => `
+                  <button data-click="${H(b.onClick)}" style="border:1px solid ${b.active ? ACCENT : TH.border};background:${b.active ? ACCENT : 'transparent'};color:${b.active ? '#fff' : GREY};border-radius:999px;padding:6px 13px;cursor:pointer;font-size:12.5px;font-weight:600">${b.label}</button>`).join('')}
+                ${r.showCategory ? `
+                  <select data-change="${H(r.onCategory)}" style="margin-left:auto;border:1px solid ${TH.border};border-radius:10px;padding:7px 10px;background:${TH.surface};cursor:pointer;font-size:12.5px">
+                    ${r.catOptions.map(o => `<option value="${o.v}" ${o.v === r.category ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+                  </select>` : ''}
+              </div>
+            </div>`).join('')}
+        </section>`}
+    </div>`;
+
   const main = `<main style="flex:1;width:100%;background:${V.pageTint};transition:background .3s ease">
     <div style="max-width:${V.isNarrow ? '1080px' : '1600px'};margin:0 auto;padding:14px clamp(10px,2.4vw,28px) 110px;display:flex;flex-direction:column;gap:14px">
-      ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}
+      ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}${importPage}
     </div>
   </main>`;
 
   const bottomNav = !V.isNarrow ? '' : `
-    <nav style="position:fixed;left:0;right:0;bottom:0;z-index:30;background:${TH.surface};border-top:1px solid ${TH.border};display:grid;grid-template-columns:repeat(5,1fr);padding:6px 4px 8px">
+    <nav style="position:fixed;left:0;right:0;bottom:0;z-index:30;background:${TH.surface};border-top:1px solid ${TH.border};display:grid;grid-template-columns:repeat(${V.navItems.length},1fr);padding:6px 4px 8px">
       ${V.navItems.map(n => `
         <button data-click="${H(n.onClick)}" style="border:0;background:transparent;padding:4px 2px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:${n.color}">
           <span style="padding:4px 16px;border-radius:14px;background:${n.pill};display:grid;place-items:center"><svg width="22" height="22"><use href="${n.icon}"></use></svg></span>

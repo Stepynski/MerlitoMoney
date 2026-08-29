@@ -2,7 +2,10 @@ import { state } from './state.js';
 import { TH, ACCENT, GREY } from './theme-runtime.js';
 import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS, APP_VERSION } from './constants.js';
 import { render } from './render.js';
-import { reopenAccount, toggleNetWorthAction, openAboutModal } from './actions.js';
+import {
+  reopenAccount, toggleNetWorthAction, openAboutModal,
+  decideStaged, setStagedField, mapFeedAction, toggleFeedSyncAction
+} from './actions.js';
 
 // ---------- helpers ported from the design ----------
 // Single source of truth for the number-format preference (comma-decimal
@@ -164,10 +167,19 @@ export function computeView() {
   const saldo = T.inc - T.exp;
   const expView = s.view === 'expenses';
 
-  const nav = [['overview', 'Overview', 'ic-bars'], ['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['budget', 'Budget', 'ic-gauge']];
+  const nav = [['overview', 'Overview', 'ic-bars'], ['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['budget', 'Budget', 'ic-gauge'], ['import', 'Import', 'ic-download']];
 
   let cells;
-  if (s.page === 'accounts') {
+  if (s.page === 'import') {
+    const undecided = s.staged.filter(r => r.decision === 'pending').length;
+    const ready = s.staged.filter(r => r.decision === 'import' || r.decision === 'link').length;
+    const flagged = s.staged.filter(r => r.decision === 'pending' && r.match_tx_id).length;
+    cells = [
+      { label: 'To review', value: String(undecided), color: TH.text },
+      { label: 'Possible duplicates', value: String(flagged), color: flagged ? RED : GREY },
+      { label: 'Ready', value: String(ready), color: ready ? GREEN : TH.text }
+    ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
+  } else if (s.page === 'accounts') {
     cells = [
       { label: 'Spendable', value: money(spendable), color: TH.text },
       { label: 'Savings', value: money(total - spendable), color: GREEN },
@@ -648,6 +660,68 @@ export function computeView() {
     backups: ['Backups', ''],
     about: ['About', '']
   }[s.modal] || ['', ''];
+  // ---------- bank import review ----------
+  const importAccountOptions = [{ v: '', l: 'Not linked' }]
+    .concat(s.accounts.filter(a => a.active).map(a => ({ v: a.id, l: a.name })));
+
+  const importFeeds = s.feeds.map(f => ({
+    uuid: f.uuid,
+    name: f.name || f.iban || f.uuid,
+    iban: f.iban || '',
+    mappedTo: f.account_id || '',
+    syncEnabled: !!f.sync_enabled,
+    accountOptions: importAccountOptions,
+    onMap: e => mapFeedAction(f.uuid, e.target.value ? +e.target.value : null),
+    onToggleSync: e => toggleFeedSyncAction(f.uuid, e.target.checked)
+  }));
+
+  const importRows = s.staged.map(r => {
+    const a = acct(r.account_id);
+    const isOut = r.direction === 'out';
+    const isTransfer = r.tx_type === 'Transfer internal';
+    const other = r.to_account_id ? acct(r.to_account_id) : null;
+    const catOptions = [{ v: '', l: 'Uncategorised' }].concat(
+      s.cats.filter(c => c.kind === (isOut ? 'expense' : 'income')).map(c => ({ v: c.id, l: c.name }))
+    );
+    const btn = (key, label) => ({
+      label, key, active: r.decision === key,
+      onClick: () => decideStaged(r.id, key)
+    });
+    return {
+      id: r.id,
+      date: r.booking_date,
+      title: r.counterparty_name || r.remittance || 'Bank transaction',
+      detail: r.counterparty_name && r.remittance && r.remittance !== r.counterparty_name ? r.remittance : '',
+      account: a ? a.name : '—',
+      accountIcon: '#' + (a ? a.icon : 'ic-wallet'),
+      amount: money(isOut ? -r.amount : r.amount, !isOut),
+      amountColor: isOut ? RED : GREEN,
+      typeLabel: isTransfer ? ('Transfer → ' + (other ? other.name : '?')) : (isOut ? 'Expense' : 'Income'),
+      isTransfer,
+      // The two banks either side of one transfer both report it; the queue
+      // says so explicitly rather than quietly hiding one of the rows.
+      pairNote: r.pair_id ? 'Both banks reported this transfer — it will be imported once.' : '',
+      showCategory: !isTransfer,
+      catOptions,
+      category: r.category_id || '',
+      onCategory: e => setStagedField(r.id, { category_id: e.target.value ? +e.target.value : null }),
+      // A suspected duplicate is described, never acted on. The candidate is
+      // spelled out so the decision is the user's to make on the evidence.
+      hasMatch: !!r.match,
+      matchText: r.match
+        ? `${r.match.date} · ${money(r.match.amount)}${r.match.note ? ' · ' + r.match.note : ''}${r.match.category ? ' · ' + r.match.category : ''}`
+        : '',
+      matchReason: r.match_reason || '',
+      decision: r.decision,
+      decided: r.decision !== 'pending',
+      buttons: [btn('import', 'Import'), ...(r.match ? [btn('link', 'Already have it')] : []), btn('skip', "Don't import")]
+    };
+  });
+
+  const stagedPending = s.staged.filter(r => r.decision === 'pending').length;
+  const stagedReady = s.staged.filter(r => r.decision !== 'pending').length;
+  const stagedFlagged = s.staged.filter(r => r.decision === 'pending' && r.match_tx_id).length;
+
   const deleteAccountTarget = s.modal === 'deleteAccount' ? acct(s.editId) : null;
   const deleteRecurringTarget = s.modal === 'deleteRecurring' ? s.recurring.find(r => r.id === s.editId) : null;
   const deleteMovementTarget = s.modal === 'deleteMovement' ? s.tx.find(t => t.id === s.editId) : null;
@@ -669,7 +743,10 @@ export function computeView() {
     }),
     summaryCells: cells,
     isAccounts: s.page === 'accounts', isCategories: s.page === 'categories', isBalance: s.page === 'balance',
-    isOverview: s.page === 'overview', isBudget: s.page === 'budget',
+    isOverview: s.page === 'overview', isBudget: s.page === 'budget', isImport: s.page === 'import',
+    importRows, importFeeds, noStaged: importRows.length === 0, noFeeds: importFeeds.length === 0,
+    stagedPending, stagedReady, stagedFlagged,
+    importBusy: s.importBusy, importMsg: s.importMsg,
     showRecurringTab: s.page === 'balance' && s.balanceTab === 'recurring',
     balanceTabs: [['movements', 'Movements'], ['recurring', 'Recurring']].map(t => {
       const on = s.balanceTab === t[0];
