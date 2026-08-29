@@ -153,7 +153,7 @@ export function renderApp() {
         <section style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
           <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:${TH.surface2};border-bottom:1px solid ${TH.border}">
             <span style="font-weight:600;font-size:14px">${g.title}</span>
-            <span style="font-weight:600;color:#2f9e44;font-variant-numeric:tabular-nums">${g.total}</span>
+            <span style="font-weight:600;color:${g.totalColor};font-variant-numeric:tabular-nums">${g.total}</span>
           </div>
           ${g.items.map(a => `
             <div style="width:100%;border-bottom:1px solid ${TH.border};background:${TH.surface};display:flex;align-items:center;gap:2px;padding:6px 10px 6px 18px">
@@ -164,7 +164,7 @@ export function renderApp() {
                     <span style="font-weight:600">${a.name}</span>
                     <span style="font-size:12px;color:${GREY}">${a.type}</span>
                   </span>
-                  <span style="font-weight:600;color:#2f9e44;font-variant-numeric:tabular-nums">${a.balance}</span>
+                  <span style="font-weight:600;color:${a.balanceColor};font-variant-numeric:tabular-nums">${a.balance}</span>
                   ${a.hasGoal ? `
                     <span style="display:flex;align-items:center;gap:9px;margin-top:2px">
                       <span style="flex:1;height:7px;border-radius:4px;background:#e9ebef;overflow:hidden;display:block">
@@ -172,6 +172,14 @@ export function renderApp() {
                       </span>
                       <span style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${a.goalLabel}</span>
                     </span>` : ''}
+                  ${a.hasUtil ? `
+                    <span style="display:flex;align-items:center;gap:9px;margin-top:2px">
+                      <span style="flex:1;height:7px;border-radius:4px;background:#e9ebef;overflow:hidden;display:block">
+                        <span style="display:block;height:100%;width:${a.utilPct};background:${a.utilColor}"></span>
+                      </span>
+                      <span style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${a.utilLabel}</span>
+                    </span>` : ''}
+                  ${a.autopayLabel ? `<span style="font-size:12px;color:${TH.textFaint}">${a.autopayLabel}</span>` : ''}
                 </span>
                 <span style="font-size:12px;color:${TH.textFaint};text-align:right;flex:none">${a.meta}</span>
               </button>
@@ -645,20 +653,48 @@ export function renderApp() {
               <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Name
                 <input id="f-name" value="${esc(V.formName)}" placeholder="e.g. Everyday account" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
               </label>
+              ${V.isCreditKind ? `
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">${V.balanceLabel}
+                  <input id="f-balance" value="${esc(V.formBalance)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+                </label>` : `
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Type
                   <select data-change="${H(e => { set('type', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
                     ${['Bank', 'Cash', 'Wallet', 'Card'].map(t => `<option value="${t}" ${t === V.formType ? 'selected' : ''}>${t === 'Wallet' ? 'Digital wallet' : t}</option>`).join('')}
                   </select>
                 </label>
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Initial balance
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">${V.balanceLabel}
                   <input id="f-balance" value="${esc(V.formBalance)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>
-              </div>
-              ${V.isSavingsKind ? `
-                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Savings goal
+              </div>`}
+              ${V.isSavingsKind || V.isCreditKind ? `
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">${V.goalLabel}
                   <input id="f-goal" value="${esc(V.formGoal)}" placeholder="10.000" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>` : ''}
+              ${V.isCreditKind ? `
+                <div style="height:1px;background:${TH.border};margin:4px 0"></div>
+                <label style="display:flex;align-items:center;gap:9px;cursor:pointer">
+                  <input type="checkbox" data-change="${H(e => { set('autopayEnabled', e.target.checked); render(); })}" ${V.formAutopayEnabled ? 'checked' : ''} style="width:17px;height:17px;cursor:pointer">
+                  <span style="font-size:13.5px">Autopay from a checking account</span>
+                </label>
+                ${V.formAutopayEnabled ? `
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Pay from
+                    <select data-change="${H(e => { set('autopayFrom', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                      ${V.autopayFromOptions.map(o => `<option value="${o.v}" ${o.v === V.formAutopayFrom ? 'selected' : ''}>${o.l}</option>`).join('')}
+                    </select>
+                  </label>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                    <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Day of the month
+                      <select data-change="${H(e => { set('autopayDay', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                        ${V.autopayDayOptions.map(o => `<option value="${o.v}" ${o.v === V.formAutopayDay ? 'selected' : ''}>${o.l}</option>`).join('')}
+                      </select>
+                    </label>
+                    <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">If it lands on a weekend
+                      <select data-change="${H(e => { set('autopayWeekendRule', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                        ${V.weekendRuleOptions.map(o => `<option value="${o.v}" ${o.v === V.formAutopayWeekendRule ? 'selected' : ''}>${o.l}</option>`).join('')}
+                      </select>
+                    </label>
+                  </div>` : ''}` : ''}
               ${V.showIban ? `
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">IBAN (optional)
                   <input id="f-iban" value="${esc(V.formIban)}" placeholder="NL91 ABNA 0417 1643 00" autocapitalize="characters" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">

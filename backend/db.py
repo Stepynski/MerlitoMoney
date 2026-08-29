@@ -27,6 +27,105 @@ def _migrate(conn):
         except sqlite3.OperationalError:
             pass  # column already exists
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_iban ON accounts(iban) WHERE iban IS NOT NULL")
+    _rebuild_accounts_grp_check(conn)
+    _rebuild_recurring_amount_mode(conn)
+
+
+def _grp_check_includes_credit(conn) -> bool:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'"
+    ).fetchone()
+    return row is not None and "'credit'" in row["sql"]
+
+
+def _rebuild_accounts_grp_check(conn):
+    """SQLite can't ALTER a CHECK constraint in place — rebuild the table.
+    Guarded by _grp_check_includes_credit so this only runs once per db."""
+    if _grp_check_includes_credit(conn):
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("""
+        CREATE TABLE accounts_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            icon TEXT NOT NULL,
+            color TEXT NOT NULL,
+            grp TEXT NOT NULL CHECK (grp IN ('spend', 'save', 'credit')),
+            starting_balance REAL NOT NULL DEFAULT 0,
+            goal_amount REAL,
+            iban TEXT,
+            bank_connection_id TEXT,
+            active INTEGER NOT NULL DEFAULT 1
+        )
+    """)
+    conn.execute("""
+        INSERT INTO accounts_new (id, name, type, icon, color, grp, starting_balance, goal_amount, iban, bank_connection_id, active)
+        SELECT id, name, type, icon, color, grp, starting_balance, goal_amount, iban, bank_connection_id, active FROM accounts
+    """)
+    conn.execute("DROP TABLE accounts")
+    conn.execute("ALTER TABLE accounts_new RENAME TO accounts")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_iban ON accounts(iban) WHERE iban IS NOT NULL")
+    bad = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if bad:
+        raise RuntimeError(f"accounts table rebuild broke referential integrity: {bad}")
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _recurring_has_amount_mode(conn) -> bool:
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(recurring_rules)")}
+    return "amount_mode" in cols
+
+
+def _rebuild_recurring_amount_mode(conn):
+    """Relaxes amount to nullable and adds amount_mode — both require a
+    table rebuild in SQLite (no ALTER for dropping NOT NULL). Guarded by
+    _recurring_has_amount_mode so this only runs once per db."""
+    if _recurring_has_amount_mode(conn):
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("""
+        CREATE TABLE recurring_rules_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL CHECK (type IN ('Expense', 'Income', 'Transfer internal')),
+            account_id INTEGER NOT NULL REFERENCES accounts(id),
+            to_account_id INTEGER REFERENCES accounts(id),
+            category_id INTEGER REFERENCES categories(id),
+            amount REAL,
+            amount_mode TEXT NOT NULL DEFAULT 'fixed' CHECK (amount_mode IN ('fixed', 'full_balance')),
+            note TEXT,
+            freq TEXT NOT NULL CHECK (freq IN ('daily', 'weekly', 'monthly', 'yearly', 'monthly_nth_business_day')),
+            interval_n INTEGER NOT NULL DEFAULT 1,
+            weekday INTEGER,
+            day_of_month INTEGER,
+            month_of_year INTEGER,
+            nth_business_day INTEGER,
+            weekend_rule TEXT NOT NULL DEFAULT 'none' CHECK (weekend_rule IN ('none', 'before', 'after')),
+            start_date TEXT NOT NULL,
+            end_date TEXT,
+            active INTEGER NOT NULL DEFAULT 1,
+            last_generated_date TEXT
+        )
+    """)
+    conn.execute("""
+        INSERT INTO recurring_rules_new (
+            id, name, type, account_id, to_account_id, category_id, amount, note, freq, interval_n,
+            weekday, day_of_month, month_of_year, nth_business_day, weekend_rule, start_date, end_date,
+            active, last_generated_date
+        )
+        SELECT
+            id, name, type, account_id, to_account_id, category_id, amount, note, freq, interval_n,
+            weekday, day_of_month, month_of_year, nth_business_day, weekend_rule, start_date, end_date,
+            active, last_generated_date
+        FROM recurring_rules
+    """)
+    conn.execute("DROP TABLE recurring_rules")
+    conn.execute("ALTER TABLE recurring_rules_new RENAME TO recurring_rules")
+    bad = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if bad:
+        raise RuntimeError(f"recurring_rules table rebuild broke referential integrity: {bad}")
+    conn.execute("PRAGMA foreign_keys = ON")
 
 
 @contextmanager

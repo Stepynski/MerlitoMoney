@@ -23,21 +23,37 @@ export async function submit() {
 export async function submitModal(f) {
   if (state.modal === 'account') {
     const isSave = f.kind === 'save';
+    const isCredit = f.kind === 'credit';
     const editing = acct(state.editId);
+    const wasCredit = editing && editing.grp === 'credit';
     const body = {
       name: f.name.trim() || 'New account',
-      type: isSave ? 'Savings' : f.type,
-      icon: isSave ? 'ic-piggy' : (f.type === 'Cash' ? 'ic-cash' : f.type === 'Wallet' ? 'ic-wallet' : 'ic-bank'),
-      color: isSave ? '#40c057' : (editing ? editing.color : PAL[state.accounts.length % PAL.length]),
-      grp: isSave ? 'save' : 'spend',
-      starting_balance: num(f.balance),
-      goal_amount: isSave && num(f.goal) > 0 ? num(f.goal) : null,
+      type: isSave ? 'Savings' : isCredit ? 'Credit card' : f.type,
+      icon: isSave ? 'ic-piggy' : isCredit ? 'ic-card' : (f.type === 'Cash' ? 'ic-cash' : f.type === 'Wallet' ? 'ic-wallet' : 'ic-bank'),
+      color: isSave ? '#40c057' : isCredit ? '#e03b34' : (editing ? editing.color : PAL[state.accounts.length % PAL.length]),
+      grp: isSave ? 'save' : isCredit ? 'credit' : 'spend',
+      starting_balance: isCredit ? -Math.abs(num(f.balance)) : num(f.balance),
+      goal_amount: (isSave || isCredit) && num(f.goal) > 0 ? num(f.goal) : null,
       iban: f.iban ? f.iban.trim() : null
     };
+    let accountId = editing ? editing.id : null;
     if (editing) {
       await api('/api/accounts/' + editing.id, { method: 'PATCH', body: JSON.stringify(body) });
     } else {
-      await api('/api/accounts', { method: 'POST', body: JSON.stringify(body) });
+      const created = await api('/api/accounts', { method: 'POST', body: JSON.stringify(body) });
+      accountId = created.id;
+    }
+    if (accountId && (isCredit || wasCredit)) {
+      const enabled = isCredit && !!f.autopayEnabled && !!f.autopayFrom;
+      await api('/api/accounts/' + accountId + '/autopay', {
+        method: 'PUT',
+        body: JSON.stringify({
+          enabled,
+          from_account_id: enabled ? f.autopayFrom : null,
+          day_of_month: enabled ? parseInt(f.autopayDay, 10) : null,
+          weekend_rule: f.autopayWeekendRule || 'none'
+        })
+      });
     }
   } else if (state.modal === 'budget') {
     const id = f.category || ((unbudgeted()[0] || {}).id);
