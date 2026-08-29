@@ -14,7 +14,7 @@ from auth import check_password, ensure_password_seeded, hash_password
 from db import ensure_default_categories, get_conn, init_db, rows_to_dicts
 from iban import is_valid_iban, normalize_iban
 from datetime import date
-from recurring import generate_due, next_occurrence
+from recurring import generate_due, next_occurrence, _add_months, _clamp_day, _months_between
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -182,6 +182,13 @@ def _autopay_rule(conn, card_account_id):
     ).fetchone()
 
 
+def _loan_rule(conn, loan_account_id):
+    return conn.execute(
+        "SELECT * FROM recurring_rules WHERE to_account_id = ? AND amount_mode = 'amortized'",
+        (loan_account_id,),
+    ).fetchone()
+
+
 @app.get("/api/accounts", dependencies=[])
 def list_accounts(request: Request):
     require_auth(request)
@@ -191,6 +198,7 @@ def list_accounts(request: Request):
         for a in accounts:
             a["balance"] = a["starting_balance"] + deltas.get(a["id"], 0)
             a["autopay"] = None
+            a["loan"] = None
             if a["grp"] == "credit":
                 rule = _autopay_rule(conn, a["id"])
                 if rule:
@@ -202,6 +210,22 @@ def list_accounts(request: Request):
                         "day_of_month": rule["day_of_month"],
                         "weekend_rule": rule["weekend_rule"],
                         "next_date": nxt.isoformat() if nxt else None,
+                    }
+            elif a["grp"] == "loan":
+                rule = _loan_rule(conn, a["id"])
+                if rule:
+                    after = date.fromisoformat(rule["last_generated_date"]) if rule["last_generated_date"] else None
+                    nxt = next_occurrence(dict(rule), after) if rule["active"] else None
+                    end = date.fromisoformat(rule["end_date"])
+                    a["loan"] = {
+                        "from_account_id": rule["account_id"],
+                        "annual_rate": rule["annual_rate"],
+                        "category_id": rule["category_id"],
+                        "day_of_month": rule["day_of_month"],
+                        "weekend_rule": rule["weekend_rule"],
+                        "term_months_remaining": _months_between(nxt, end) if nxt else 0,
+                        "next_date": nxt.isoformat() if nxt else None,
+                        "paid_off": not bool(rule["active"]),
                     }
     return accounts
 
@@ -309,6 +333,73 @@ def set_autopay(account_id: int, body: AutopayIn, request: Request):
                 "(name, type, account_id, to_account_id, amount, amount_mode, freq, interval_n, day_of_month, weekend_rule, start_date, active) "
                 "VALUES (?, 'Transfer internal', ?, ?, NULL, 'full_balance', 'monthly', 1, ?, ?, ?, 1)",
                 (f"{card['name']} autopay", body.from_account_id, account_id, body.day_of_month, body.weekend_rule, date.today().isoformat()),
+            )
+        generate_due(conn)
+    return {"ok": True}
+
+
+class LoanScheduleIn(BaseModel):
+    from_account_id: int
+    annual_rate: float
+    term_months: int
+    category_id: Optional[int] = None
+    day_of_month: int
+    weekend_rule: str = "none"
+
+
+@app.put("/api/accounts/{account_id}/loan")
+def set_loan_schedule(account_id: int, body: LoanScheduleIn, request: Request):
+    require_auth(request)
+    with get_conn() as conn:
+        loan = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        if not loan or loan["grp"] != "loan":
+            raise HTTPException(status_code=400, detail="Not a loan account")
+        if not 1 <= body.day_of_month <= 31:
+            raise HTTPException(status_code=400, detail="day_of_month must be between 1 and 31")
+        if body.weekend_rule not in ("none", "before", "after"):
+            raise HTTPException(status_code=400, detail="Invalid weekend_rule")
+        if body.annual_rate < 0:
+            raise HTTPException(status_code=400, detail="annual_rate cannot be negative")
+        if body.term_months < 1:
+            raise HTTPException(status_code=400, detail="term_months must be at least 1")
+        from_account = conn.execute("SELECT id FROM accounts WHERE id = ?", (body.from_account_id,)).fetchone()
+        if not from_account:
+            raise HTTPException(status_code=400, detail="from_account_id does not exist")
+
+        existing = _loan_rule(conn, account_id)
+        # Anchor the term to the *next* real payment date, whether that's
+        # the very first payment (new loan, no history yet) or the next
+        # upcoming one (editing an existing schedule, e.g. a refinance) —
+        # so "term_months" always means "months remaining from here", never
+        # a total that would silently re-count already-made payments.
+        if existing:
+            start_date = existing["start_date"]
+            after = date.fromisoformat(existing["last_generated_date"]) if existing["last_generated_date"] else None
+        else:
+            start_date = date.today().isoformat()
+            after = None
+        temp_rule = {"start_date": start_date, "freq": "monthly", "interval_n": 1,
+                     "day_of_month": body.day_of_month, "weekend_rule": "none"}
+        first_occ = next_occurrence(temp_rule, after)
+        end_year, end_month = _add_months(first_occ.year, first_occ.month, body.term_months - 1)
+        end_day = _clamp_day(end_year, end_month, body.day_of_month)
+        end_date = date(end_year, end_month, end_day).isoformat()
+
+        if existing:
+            conn.execute(
+                "UPDATE recurring_rules SET account_id = ?, category_id = ?, annual_rate = ?, "
+                "day_of_month = ?, weekend_rule = ?, end_date = ?, active = 1 WHERE id = ?",
+                (body.from_account_id, body.category_id, body.annual_rate, body.day_of_month,
+                 body.weekend_rule, end_date, existing["id"]),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO recurring_rules "
+                "(name, type, account_id, to_account_id, category_id, amount, amount_mode, annual_rate, "
+                "freq, interval_n, day_of_month, weekend_rule, start_date, end_date, active) "
+                "VALUES (?, 'Transfer internal', ?, ?, ?, NULL, 'amortized', ?, 'monthly', 1, ?, ?, ?, ?, 1)",
+                (f"{loan['name']} payment", body.from_account_id, account_id, body.category_id,
+                 body.annual_rate, body.day_of_month, body.weekend_rule, start_date, end_date),
             )
         generate_due(conn)
     return {"ok": True}

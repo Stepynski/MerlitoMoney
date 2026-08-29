@@ -113,11 +113,29 @@ def _account_balance(conn, account_id):
     return balance
 
 
-def generate_due(conn):
+def _amortized_payment(principal, monthly_rate, n):
+    """Standard level-payment amortization formula. n = number of payments
+    remaining. Falls back to a plain split for a 0% loan (avoids /0)."""
+    if n <= 0:
+        return principal
+    if monthly_rate == 0:
+        return principal / n
+    factor = (1 + monthly_rate) ** n
+    return principal * monthly_rate * factor / (factor - 1)
+
+
+def _months_between(from_date, to_date):
+    """Inclusive month count from from_date's month to to_date's month."""
+    return (to_date.year - from_date.year) * 12 + (to_date.month - from_date.month) + 1
+
+
+def generate_due(conn, today=None):
     """Materialize every occurrence due (up to today, or the rule's
     end_date if earlier) for every active rule. Idempotent — safe to call
-    on every request."""
-    today = date.today()
+    on every request. `today` defaults to the real date; the override
+    exists for deterministic testing of multi-cycle schedules."""
+    if today is None:
+        today = date.today()
     rules = [dict(r) for r in conn.execute("SELECT * FROM recurring_rules WHERE active = 1")]
     for rule in rules:
         ceiling = today
@@ -138,14 +156,63 @@ def generate_due(conn):
                 # the same date forever.
                 owed = -_account_balance(conn, rule['to_account_id'])
                 amount = round(owed, 2) if owed > 0 else 0
+                if amount:
+                    conn.execute(
+                        "INSERT INTO transactions (date, account_id, to_account_id, type, category_id, amount, note, recurring_id) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (occ.isoformat(), rule['account_id'], rule['to_account_id'], rule['type'],
+                         rule['category_id'], amount, rule['note'], rule['id']),
+                    )
+            elif rule['amount_mode'] == 'amortized':
+                # A loan payment: the outstanding principal *is* the linked
+                # loan account's balance (negated) — never a separately
+                # tracked number, so a manually-recorded prepayment (just a
+                # Transfer internal into that account) is automatically
+                # reflected here with no extra step. Nothing owed -> the
+                # loan is paid off (possibly early, via a prepayment):
+                # deactivate and stop generating for this rule entirely.
+                principal = -_account_balance(conn, rule['to_account_id'])
+                if principal <= 0.005:
+                    conn.execute("UPDATE recurring_rules SET active = 0, last_generated_date = ? WHERE id = ?", (occ.isoformat(), rule['id']))
+                    break
+                monthly_rate = (rule['annual_rate'] or 0) / 12
+                # Uses the actual (possibly weekend-shifted) occurrence date
+                # for the remaining-term count; a payment landing right on a
+                # month boundary due to a weekend shift could be off by one
+                # cycle near the very end — harmless, the clamp below still
+                # guarantees the loan reaches exactly zero.
+                remaining_n = _months_between(occ, date.fromisoformat(rule['end_date']))
+                payment = _amortized_payment(principal, monthly_rate, remaining_n)
+                interest = round(principal * monthly_rate, 2)
+                principal_amount = round(payment - interest, 2)
+                if principal_amount > principal:
+                    principal_amount = round(principal, 2)
+                conn.execute(
+                    "INSERT INTO transactions (date, account_id, type, category_id, amount, note, recurring_id) "
+                    "VALUES (?, ?, 'Expense', ?, ?, ?, ?)",
+                    (occ.isoformat(), rule['account_id'], rule['category_id'], interest, 'Loan interest', rule['id']),
+                )
+                conn.execute(
+                    "INSERT INTO transactions (date, account_id, to_account_id, type, amount, note, recurring_id) "
+                    "VALUES (?, ?, ?, 'Transfer internal', ?, ?, ?)",
+                    (occ.isoformat(), rule['account_id'], rule['to_account_id'], principal_amount, 'Loan principal', rule['id']),
+                )
             else:
                 amount = rule['amount']
-            if amount:
-                conn.execute(
-                    "INSERT INTO transactions (date, account_id, to_account_id, type, category_id, amount, note, recurring_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (occ.isoformat(), rule['account_id'], rule['to_account_id'], rule['type'],
-                     rule['category_id'], amount, rule['note'], rule['id']),
-                )
+                if amount:
+                    conn.execute(
+                        "INSERT INTO transactions (date, account_id, to_account_id, type, category_id, amount, note, recurring_id) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (occ.isoformat(), rule['account_id'], rule['to_account_id'], rule['type'],
+                         rule['category_id'], amount, rule['note'], rule['id']),
+                    )
             conn.execute("UPDATE recurring_rules SET last_generated_date = ? WHERE id = ?", (occ.isoformat(), rule['id']))
             after = occ
+        if rule['amount_mode'] == 'amortized':
+            # The loop above only deactivates on an early payoff (found
+            # mid-schedule, before the next occurrence). A loan that simply
+            # reaches the end of its natural term needs the same check once
+            # more here, since the final regular payment already zeroed the
+            # balance but nothing inside the loop re-checked it afterwards.
+            if -_account_balance(conn, rule['to_account_id']) <= 0.005:
+                conn.execute("UPDATE recurring_rules SET active = 0 WHERE id = ?", (rule['id'],))

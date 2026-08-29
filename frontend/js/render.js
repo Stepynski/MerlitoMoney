@@ -85,6 +85,12 @@ export function render() {
   if (newPwInput) newPwInput.addEventListener('input', e => set('newPassword', e.target.value));
   const confirmPwInput = root.querySelector('#f-confirm-new-password');
   if (confirmPwInput) confirmPwInput.addEventListener('input', e => set('confirmNewPassword', e.target.value));
+  const loanRateInput = root.querySelector('#f-loan-rate');
+  if (loanRateInput) loanRateInput.addEventListener('input', e => set('loanRate', e.target.value));
+  const loanTermInput = root.querySelector('#f-loan-term');
+  if (loanTermInput) loanTermInput.addEventListener('input', e => set('loanTermMonths', e.target.value));
+  const extraPaymentAmountInput = root.querySelector('#f-extra-payment-amount');
+  if (extraPaymentAmountInput) extraPaymentAmountInput.addEventListener('input', e => set('extraPaymentAmount', e.target.value));
   const pwInput = root.querySelector('#f-password');
   if (pwInput) pwInput.focus();
 }
@@ -179,10 +185,19 @@ export function renderApp() {
                       </span>
                       <span style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${a.utilLabel}</span>
                     </span>` : ''}
+                  ${a.hasPayoff ? `
+                    <span style="display:flex;align-items:center;gap:9px;margin-top:2px">
+                      <span style="flex:1;height:7px;border-radius:4px;background:#e9ebef;overflow:hidden;display:block">
+                        <span style="display:block;height:100%;width:${a.payoffPct};background:#40c057"></span>
+                      </span>
+                      <span style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${a.payoffLabel}</span>
+                    </span>` : ''}
                   ${a.autopayLabel ? `<span style="font-size:12px;color:${TH.textFaint}">${a.autopayLabel}</span>` : ''}
+                  ${a.loanLabel ? `<span style="font-size:12px;color:${TH.textFaint}">${a.loanLabel}</span>` : ''}
                 </span>
                 <span style="font-size:12px;color:${TH.textFaint};text-align:right;flex:none">${a.meta}</span>
               </button>
+              ${a.isLoan ? `<button data-click="${H(a.onExtraPayment)}" aria-label="Add extra payment on ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-piggy"></use></svg></button>` : ''}
               <button data-click="${H(a.onEdit)}" aria-label="Edit ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-edit"></use></svg></button>
               <button data-click="${H(a.onDelete)}" aria-label="Delete ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-trash"></use></svg></button>
             </div>`).join('')}
@@ -595,6 +610,20 @@ export function renderApp() {
               </button>
             </div>` : ''}
 
+          ${V.isExtraPaymentModal ? `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <p style="margin:0;font-size:14px;color:${GREY};line-height:1.5">
+                Extra principal payment on <strong style="color:${TH.text}">${esc(V.extraPaymentAccountName)}</strong> (currently owed: <strong style="color:${TH.text}">${V.extraPaymentOwed}</strong>). This reduces the debt immediately, and the next scheduled payment is recalculated for the remaining term automatically.
+              </p>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Amount
+                <input id="f-extra-payment-amount" value="${esc(V.formExtraPaymentAmount)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Date
+                <input type="date" data-change="${H(e => { set('extraPaymentDate', e.target.value); render(); })}" value="${V.formExtraPaymentDate}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+              </label>
+              ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
+            </div>` : ''}
+
           ${V.isDeleteMovementModal ? `
             <div style="display:flex;flex-direction:column;gap:14px">
               <p style="margin:0;font-size:14px;color:${GREY};line-height:1.5">
@@ -653,7 +682,7 @@ export function renderApp() {
               <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Name
                 <input id="f-name" value="${esc(V.formName)}" placeholder="e.g. Everyday account" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
               </label>
-              ${V.isCreditKind ? `
+              ${V.isCreditKind || V.isLoanKind ? `
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">${V.balanceLabel}
                   <input id="f-balance" value="${esc(V.formBalance)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>` : `
@@ -667,7 +696,7 @@ export function renderApp() {
                   <input id="f-balance" value="${esc(V.formBalance)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>
               </div>`}
-              ${V.isSavingsKind || V.isCreditKind ? `
+              ${V.isSavingsKind || V.isCreditKind || V.isLoanKind ? `
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">${V.goalLabel}
                   <input id="f-goal" value="${esc(V.formGoal)}" placeholder="10.000" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>` : ''}
@@ -695,6 +724,39 @@ export function renderApp() {
                       </select>
                     </label>
                   </div>` : ''}` : ''}
+              ${V.isLoanKind ? `
+                <div style="height:1px;background:${TH.border};margin:4px 0"></div>
+                <span style="font-size:12px;font-weight:600;color:${GREY};text-transform:uppercase;letter-spacing:0.06em">Loan schedule</span>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Pay from
+                  <select data-change="${H(e => { set('loanFrom', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${V.loanFromOptions.map(o => `<option value="${o.v}" ${o.v === V.formLoanFrom ? 'selected' : ''}>${o.l}</option>`).join('')}
+                  </select>
+                </label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Annual interest rate %
+                    <input id="f-loan-rate" value="${esc(V.formLoanRate)}" placeholder="3,5" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+                  </label>
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Remaining term (months)
+                    <input id="f-loan-term" value="${esc(V.formLoanTermMonths)}" placeholder="84" inputmode="numeric" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+                  </label>
+                </div>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Interest category
+                  <select data-change="${H(e => { set('loanCategory', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${V.loanCategoryOptions.map(o => `<option value="${o.v}" ${o.v === V.formLoanCategory ? 'selected' : ''}>${o.l}</option>`).join('')}
+                  </select>
+                </label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Day of the month
+                    <select data-change="${H(e => { set('loanDay', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                      ${V.autopayDayOptions.map(o => `<option value="${o.v}" ${o.v === V.formLoanDay ? 'selected' : ''}>${o.l}</option>`).join('')}
+                    </select>
+                  </label>
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">If it lands on a weekend
+                    <select data-change="${H(e => { set('loanWeekendRule', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                      ${V.weekendRuleOptions.map(o => `<option value="${o.v}" ${o.v === V.formLoanWeekendRule ? 'selected' : ''}>${o.l}</option>`).join('')}
+                    </select>
+                  </label>
+                </div>` : ''}
               ${V.showIban ? `
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">IBAN (optional)
                   <input id="f-iban" value="${esc(V.formIban)}" placeholder="NL91 ABNA 0417 1643 00" autocapitalize="characters" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">

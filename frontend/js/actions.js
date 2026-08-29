@@ -24,16 +24,17 @@ export async function submitModal(f) {
   if (state.modal === 'account') {
     const isSave = f.kind === 'save';
     const isCredit = f.kind === 'credit';
+    const isLoan = f.kind === 'loan';
     const editing = acct(state.editId);
     const wasCredit = editing && editing.grp === 'credit';
     const body = {
       name: f.name.trim() || 'New account',
-      type: isSave ? 'Savings' : isCredit ? 'Credit card' : f.type,
-      icon: isSave ? 'ic-piggy' : isCredit ? 'ic-card' : (f.type === 'Cash' ? 'ic-cash' : f.type === 'Wallet' ? 'ic-wallet' : 'ic-bank'),
-      color: isSave ? '#40c057' : isCredit ? '#e03b34' : (editing ? editing.color : PAL[state.accounts.length % PAL.length]),
-      grp: isSave ? 'save' : isCredit ? 'credit' : 'spend',
-      starting_balance: isCredit ? -Math.abs(num(f.balance)) : num(f.balance),
-      goal_amount: (isSave || isCredit) && num(f.goal) > 0 ? num(f.goal) : null,
+      type: isSave ? 'Savings' : isCredit ? 'Credit card' : isLoan ? 'Loan' : f.type,
+      icon: isSave ? 'ic-piggy' : isCredit ? 'ic-card' : isLoan ? 'ic-bank' : (f.type === 'Cash' ? 'ic-cash' : f.type === 'Wallet' ? 'ic-wallet' : 'ic-bank'),
+      color: isSave ? '#40c057' : isCredit ? '#e03b34' : isLoan ? '#e8890c' : (editing ? editing.color : PAL[state.accounts.length % PAL.length]),
+      grp: isSave ? 'save' : isCredit ? 'credit' : isLoan ? 'loan' : 'spend',
+      starting_balance: (isCredit || isLoan) ? -Math.abs(num(f.balance)) : num(f.balance),
+      goal_amount: (isSave || isCredit || isLoan) && num(f.goal) > 0 ? num(f.goal) : null,
       iban: f.iban ? f.iban.trim() : null
     };
     let accountId = editing ? editing.id : null;
@@ -55,6 +56,33 @@ export async function submitModal(f) {
         })
       });
     }
+    if (accountId && isLoan) {
+      if (!f.loanFrom || !num(f.loanRate) && f.loanRate !== '0' || !parseInt(f.loanTermMonths, 10)) {
+        throw new Error('A loan needs a funding account, interest rate, and remaining term to set up its schedule');
+      }
+      await api('/api/accounts/' + accountId + '/loan', {
+        method: 'PUT',
+        body: JSON.stringify({
+          from_account_id: f.loanFrom,
+          annual_rate: num(f.loanRate) / 100,
+          term_months: parseInt(f.loanTermMonths, 10),
+          category_id: f.loanCategory || null,
+          day_of_month: parseInt(f.loanDay, 10),
+          weekend_rule: f.loanWeekendRule || 'none'
+        })
+      });
+    }
+  } else if (state.modal === 'extraPayment') {
+    const rule = state.recurring.find(r => String(r.id) === String(f.extraPaymentRuleId));
+    if (!rule) throw new Error("Set up this loan's payment schedule first");
+    if (!num(f.extraPaymentAmount)) throw new Error('Enter an amount');
+    await api('/api/transactions', {
+      method: 'POST',
+      body: JSON.stringify({
+        date: f.extraPaymentDate, account_id: rule.account_id, to_account_id: rule.to_account_id,
+        type: 'Transfer internal', amount: num(f.extraPaymentAmount), note: 'Extra loan payment'
+      })
+    });
   } else if (state.modal === 'budget') {
     const id = f.category || ((unbudgeted()[0] || {}).id);
     if (id) await api('/api/budgets', { method: 'POST', body: JSON.stringify({ category_id: id, monthly_limit: num(f.limit) || 100 }) });

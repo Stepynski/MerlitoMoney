@@ -50,7 +50,7 @@ export function totals() {
 }
 export function unbudgeted() { return state.cats.filter(c => c.kind === 'expense' && state.budgets[c.id] === undefined); }
 export function monthlyEquivalent(r) {
-  if (r.amount_mode === 'full_balance') return 0; // future charges unknown, can't project
+  if (r.amount_mode === 'full_balance' || r.amount_mode === 'amortized') return 0; // future amount isn't a fixed number, can't project
   const n = r.interval_n || 1;
   if (r.freq === 'daily') return r.amount * 30.44 / n;
   if (r.freq === 'weekly') return r.amount * 4.348 / n;
@@ -58,6 +58,10 @@ export function monthlyEquivalent(r) {
   return r.amount / n; // monthly, monthly_nth_business_day
 }
 export function describeFrequency(r) {
+  if (r.amount_mode === 'amortized') {
+    const rate = ((r.annual_rate || 0) * 100).toLocaleString('de-DE', { maximumFractionDigits: 2 });
+    return `Amortized loan payment on the ${r.day_of_month}${r.day_of_month === 1 ? 'st' : r.day_of_month === 2 ? 'nd' : r.day_of_month === 3 ? 'rd' : 'th'} · ${rate}% fixed rate`;
+  }
   const WD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const ord = n => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
   const every = r.interval_n > 1 ? `Every ${r.interval_n} ` : null;
@@ -105,7 +109,11 @@ export function openModal(kind, editId, form) {
     recurMovement: 'Expense', freq: 'monthly', intervalN: '1', weekday: '0', dayOfMonth: '1', monthOfYear: '1',
     nthBusinessDay: '-1', weekendRule: 'none', startDate: new Date().toISOString().slice(0, 10), endDate: '', noEnd: true,
     dangerPassword: '', dangerConfirm: '', currentPassword: '', newPassword: '', confirmNewPassword: '',
-    autopayEnabled: false, autopayFrom: '', autopayDay: '1', autopayWeekendRule: 'none'
+    autopayEnabled: false, autopayFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '', autopayDay: '1', autopayWeekendRule: 'none',
+    loanFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '', loanRate: '', loanTermMonths: '',
+    loanCategory: (state.cats.find(c => c.name === 'Loan Interest') || state.cats.find(c => c.kind === 'expense') || {}).id || '',
+    loanDay: '1', loanWeekendRule: 'none',
+    extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10), extraPaymentRuleId: ''
   }, form || {});
   render();
 }
@@ -158,18 +166,32 @@ export function computeView() {
 
   const editAccount = a => openModal('account', a.id, {
     name: a.name, type: a.type,
-    balance: a.grp === 'credit' ? String(Math.abs(a.starting_balance)) : String(a.starting_balance),
+    balance: (a.grp === 'credit' || a.grp === 'loan') ? String(Math.abs(a.starting_balance)) : String(a.starting_balance),
     goal: a.goal_amount ? String(a.goal_amount) : '', kind: a.grp, iban: a.iban || '',
     autopayEnabled: !!(a.autopay && a.autopay.enabled),
     autopayFrom: a.autopay && a.autopay.from_account_id ? a.autopay.from_account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || ''),
     autopayDay: a.autopay ? String(a.autopay.day_of_month) : '1',
-    autopayWeekendRule: a.autopay ? a.autopay.weekend_rule : 'none'
+    autopayWeekendRule: a.autopay ? a.autopay.weekend_rule : 'none',
+    loanFrom: a.loan && a.loan.from_account_id ? a.loan.from_account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || ''),
+    loanRate: a.loan ? String(((a.loan.annual_rate || 0) * 100)) : '',
+    loanTermMonths: a.loan ? String(a.loan.term_months_remaining) : '',
+    loanCategory: a.loan && a.loan.category_id ? a.loan.category_id : ((s.cats.find(c => c.name === 'Loan Interest') || s.cats.find(c => c.kind === 'expense') || {}).id || ''),
+    loanDay: a.loan ? String(a.loan.day_of_month) : '1',
+    loanWeekendRule: a.loan ? a.loan.weekend_rule : 'none'
   });
+  const addExtraPayment = a => {
+    const rule = s.recurring.find(r => r.to_account_id === a.id && r.amount_mode === 'amortized');
+    openModal('extraPayment', a.id, {
+      extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10),
+      extraPaymentRuleId: rule ? rule.id : ''
+    });
+  };
   const accountGroups = [
-    { key: 'spend', title: 'Accounts' }, { key: 'save', title: 'Savings accounts' }, { key: 'credit', title: 'Credit cards' }
+    { key: 'spend', title: 'Accounts' }, { key: 'save', title: 'Savings accounts' },
+    { key: 'credit', title: 'Credit cards' }, { key: 'loan', title: 'Loans' }
   ].map(g => {
     const items = s.accounts.filter(a => a.grp === g.key && a.active);
-    const isCredit = g.key === 'credit';
+    const isCredit = g.key === 'credit', isLoan = g.key === 'loan';
     const groupSum = items.reduce((x, a) => x + a.balance, 0);
     return {
       title: g.title, total: money(groupSum), totalColor: groupSum < 0 ? RED : GREEN,
@@ -177,23 +199,32 @@ export function computeView() {
         const own = s.tx.filter(t => t.account_id === a.id);
         const owed = isCredit ? Math.max(0, -a.balance) : 0;
         const utilPct = isCredit && a.goal_amount ? Math.min(100, owed / a.goal_amount * 100) : 0;
+        const paidOff = isLoan && a.goal_amount ? Math.min(100, Math.max(0, (a.goal_amount + a.balance) / a.goal_amount * 100)) : 0;
         return {
-          name: a.name, type: a.type, icon: '#' + a.icon, color: a.color, balance: money(a.balance),
+          id: a.id, name: a.name, type: a.type, icon: '#' + a.icon, color: a.color, balance: money(a.balance),
           balanceColor: a.balance < 0 ? RED : GREEN,
-          hasGoal: !isCredit && !!a.goal_amount,
-          goalPct: !isCredit && a.goal_amount ? Math.min(100, a.balance / a.goal_amount * 100) + '%' : '0%',
-          goalLabel: !isCredit && a.goal_amount ? Math.round(a.balance / a.goal_amount * 100) + '% of ' + short(a.goal_amount) : '',
+          hasGoal: !isCredit && !isLoan && !!a.goal_amount,
+          goalPct: !isCredit && !isLoan && a.goal_amount ? Math.min(100, a.balance / a.goal_amount * 100) + '%' : '0%',
+          goalLabel: !isCredit && !isLoan && a.goal_amount ? Math.round(a.balance / a.goal_amount * 100) + '% of ' + short(a.goal_amount) : '',
           hasUtil: isCredit && !!a.goal_amount,
           utilPct: utilPct + '%',
           utilColor: utilPct > 70 ? RED : utilPct > 30 ? '#e8890c' : '#40c057',
           utilLabel: isCredit && a.goal_amount ? Math.round(utilPct) + '% of ' + short(a.goal_amount) + ' limit' : '',
+          hasPayoff: isLoan && !!a.goal_amount,
+          payoffPct: paidOff + '%',
+          payoffLabel: isLoan && a.goal_amount ? Math.round(paidOff) + '% paid off of ' + short(a.goal_amount) : '',
           autopayLabel: !isCredit ? '' : (a.autopay && a.autopay.enabled
             ? 'Autopay ' + (a.autopay.next_date ? 'on ' + dm(new Date(a.autopay.next_date + 'T00:00:00')) : 'scheduled')
             : 'Autopay off'),
+          loanLabel: !isLoan ? '' : (a.loan
+            ? (a.loan.paid_off ? 'Paid off' : 'Next payment ' + (a.loan.next_date ? dm(new Date(a.loan.next_date + 'T00:00:00')) : '—') + ' · ' + a.loan.term_months_remaining + ' left')
+            : 'No schedule set'),
+          isLoan,
           meta: own.length ? own.length + ' mov.' : 'new',
           onClick: () => { s.page = 'balance'; s.balanceTab = 'movements'; s.fAccounts = [a.id]; s.filtersOpen = true; render(); },
           onEdit: () => editAccount(a),
-          onDelete: () => openModal('deleteAccount', a.id)
+          onDelete: () => openModal('deleteAccount', a.id),
+          onExtraPayment: () => addExtraPayment(a)
         };
       })
     };
@@ -219,12 +250,13 @@ export function computeView() {
   const recurringRows = s.recurring.map(r => {
     const c = cat(r.category_id), a = acct(r.account_id), toA = acct(r.to_account_id);
     const isFullBalance = r.amount_mode === 'full_balance';
+    const isAmortized = r.amount_mode === 'amortized';
     return {
       id: r.id, name: r.name, active: !!r.active,
-      icon: '#' + (isFullBalance ? 'ic-card' : c ? c.icon : (r.type === 'Income' ? 'ic-salary' : 'ic-refresh')),
-      color: isFullBalance ? (toA ? toA.color : GREY) : c ? c.color : (r.type === 'Income' ? GREEN : GREY),
-      amount: isFullBalance ? 'Full balance' : money(r.type === 'Expense' ? -r.amount : r.amount, r.type === 'Income'),
-      amountColor: isFullBalance ? GREY : r.type === 'Expense' ? RED : r.type === 'Income' ? GREEN : GREY,
+      icon: '#' + (isFullBalance ? 'ic-card' : isAmortized ? 'ic-bank' : c ? c.icon : (r.type === 'Income' ? 'ic-salary' : 'ic-refresh')),
+      color: (isFullBalance || isAmortized) ? (toA ? toA.color : GREY) : c ? c.color : (r.type === 'Income' ? GREEN : GREY),
+      amount: isFullBalance ? 'Full balance' : isAmortized ? 'Interest + principal' : money(r.type === 'Expense' ? -r.amount : r.amount, r.type === 'Income'),
+      amountColor: (isFullBalance || isAmortized) ? GREY : r.type === 'Expense' ? RED : r.type === 'Income' ? GREEN : GREY,
       account: a ? a.name : '—',
       freqLabel: describeFrequency(r),
       nextLabel: !r.active ? 'Paused' : (r.next_date ? 'Next: ' + dm(new Date(r.next_date + 'T00:00:00')) : 'Finished'),
@@ -419,11 +451,13 @@ export function computeView() {
     deleteRecurring: ['Manage recurring rule', ''],
     settings: ['Settings', ''],
     deleteAllData: ['Delete all data', ''],
-    changePassword: ['Change password', '']
+    changePassword: ['Change password', ''],
+    extraPayment: ['Add extra payment', 'Add']
   }[s.modal] || ['', ''];
   const deleteAccountTarget = s.modal === 'deleteAccount' ? acct(s.editId) : null;
   const deleteRecurringTarget = s.modal === 'deleteRecurring' ? s.recurring.find(r => r.id === s.editId) : null;
   const deleteMovementTarget = s.modal === 'deleteMovement' ? s.tx.find(t => t.id === s.editId) : null;
+  const extraPaymentTarget = s.modal === 'extraPayment' ? acct(s.editId) : null;
 
   return {
     isNarrow: s.narrow, isWide: !s.narrow,
@@ -483,6 +517,10 @@ export function computeView() {
     isDeleteAllDataModal: s.modal === 'deleteAllData', isChangePasswordModal: s.modal === 'changePassword',
     formDangerPassword: s.form.dangerPassword, formDangerConfirm: s.form.dangerConfirm,
     formCurrentPassword: s.form.currentPassword, formNewPassword: s.form.newPassword, formConfirmNewPassword: s.form.confirmNewPassword,
+    isExtraPaymentModal: s.modal === 'extraPayment',
+    extraPaymentAccountName: extraPaymentTarget ? extraPaymentTarget.name : '',
+    extraPaymentOwed: extraPaymentTarget ? money(Math.max(0, -extraPaymentTarget.balance)) : '',
+    formExtraPaymentAmount: s.form.extraPaymentAmount, formExtraPaymentDate: s.form.extraPaymentDate,
     modalTitle: modalMeta[0], modalCta: modalMeta[1],
     movementTabs: [['Expense', 'Expenses'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
       const on = s.form.movement === t[0];
@@ -497,18 +535,22 @@ export function computeView() {
     accountOptions: s.accounts.filter(a => a.active).map(a => ({ v: a.id, l: a.name + ' · ' + money(a.balance) })),
     toAccountOptions: s.accounts.filter(a => a.active && a.id !== s.form.account).map(a => ({ v: a.id, l: a.name })),
     formAmount: s.form.amount, formAccount: s.form.account, formToAccount: s.form.toAccount, formNote: s.form.note,
-    accountKinds: [['spend', 'Account', 'ic-wallet'], ['save', 'Savings account', 'ic-piggy'], ['credit', 'Credit card', 'ic-card']].map(k => ({
+    accountKinds: [['spend', 'Account', 'ic-wallet'], ['save', 'Savings account', 'ic-piggy'], ['credit', 'Credit card', 'ic-card'], ['loan', 'Loan', 'ic-bank']].map(k => ({
       value: k[0], label: k[1], icon: '#' + k[2],
       ring: s.form.kind === k[0] ? ACCENT : TH.border, dot: s.form.kind === k[0] ? ACCENT : 'transparent'
     })),
-    isSavingsKind: s.form.kind === 'save', isCreditKind: s.form.kind === 'credit',
-    showIban: s.form.kind !== 'credit' && (s.form.kind === 'save' || s.form.type === 'Bank'),
-    balanceLabel: s.form.kind === 'credit' ? 'Current balance owed (optional)' : 'Initial balance',
-    goalLabel: s.form.kind === 'credit' ? 'Credit limit (optional)' : 'Savings goal',
+    isSavingsKind: s.form.kind === 'save', isCreditKind: s.form.kind === 'credit', isLoanKind: s.form.kind === 'loan',
+    showIban: s.form.kind !== 'credit' && s.form.kind !== 'loan' && (s.form.kind === 'save' || s.form.type === 'Bank'),
+    balanceLabel: s.form.kind === 'credit' ? 'Current balance owed (optional)' : s.form.kind === 'loan' ? 'Current amount owed' : 'Initial balance',
+    goalLabel: s.form.kind === 'credit' ? 'Credit limit (optional)' : s.form.kind === 'loan' ? 'Original loan amount (optional)' : 'Savings goal',
     formAutopayEnabled: s.form.autopayEnabled, formAutopayFrom: s.form.autopayFrom,
     formAutopayDay: s.form.autopayDay, formAutopayWeekendRule: s.form.autopayWeekendRule,
     autopayFromOptions: s.accounts.filter(a => a.grp === 'spend' && a.active && a.id !== s.editId).map(a => ({ v: a.id, l: a.name })),
     autopayDayOptions: Array.from({ length: 31 }, (_, i) => i + 1).map(n => ({ v: String(n), l: String(n) })),
+    formLoanFrom: s.form.loanFrom, formLoanRate: s.form.loanRate, formLoanTermMonths: s.form.loanTermMonths,
+    formLoanCategory: s.form.loanCategory, formLoanDay: s.form.loanDay, formLoanWeekendRule: s.form.loanWeekendRule,
+    loanFromOptions: s.accounts.filter(a => a.grp === 'spend' && a.active && a.id !== s.editId).map(a => ({ v: a.id, l: a.name })),
+    loanCategoryOptions: s.cats.filter(c => c.kind === 'expense').map(c => ({ v: c.id, l: c.name })),
     formIban: s.form.iban, formError: s.formError,
     recurTypeTabs: [['Expense', 'Expense'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
       const on = s.form.recurMovement === t[0];
