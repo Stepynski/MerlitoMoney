@@ -1,3 +1,6 @@
+import csv
+import io
+import json
 import os
 import secrets
 import sqlite3
@@ -5,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
@@ -13,7 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from auth import check_password, ensure_password_seeded, hash_password
 from db import ensure_default_categories, get_conn, init_db, rows_to_dicts
 from iban import is_valid_iban, normalize_iban
-from datetime import date
+from datetime import date, datetime
 from recurring import generate_due, next_occurrence, _add_months, _clamp_day, _months_between
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -697,6 +700,104 @@ def delete_recurring(recurring_id: int, request: Request):
         # only unlink them, since recurring_id has no ON DELETE action.
         conn.execute("UPDATE transactions SET recurring_id = NULL WHERE recurring_id = ?", (recurring_id,))
         conn.execute("DELETE FROM recurring_rules WHERE id = ?", (recurring_id,))
+    return {"ok": True}
+
+
+# ---------- data export / backup ----------
+
+# Parent tables before children, matching FK direction — reused for both
+# insert order (on restore) and to know which tables round-trip at all.
+BACKUP_TABLES = ["categories", "accounts", "recurring_rules", "transactions", "budgets"]
+
+
+@app.get("/api/export/transactions.csv")
+def export_transactions_csv(request: Request):
+    require_auth(request)
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT t.date, t.type, a1.name AS account, a2.name AS to_account, "
+            "c.name AS category, t.amount, t.note "
+            "FROM transactions t "
+            "JOIN accounts a1 ON a1.id = t.account_id "
+            "LEFT JOIN accounts a2 ON a2.id = t.to_account_id "
+            "LEFT JOIN categories c ON c.id = t.category_id "
+            "ORDER BY t.date, t.id"
+        ).fetchall()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Date", "Type", "Account", "To account", "Category", "Amount", "Note"])
+    for r in rows:
+        writer.writerow([
+            r["date"], r["type"], r["account"], r["to_account"] or "",
+            r["category"] or "", f'{r["amount"]:.2f}', r["note"] or "",
+        ])
+    filename = f"merlitomoney-transactions-{date.today().isoformat()}.csv"
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/backup/export")
+def export_backup(request: Request):
+    require_auth(request)
+    with get_conn() as conn:
+        payload = {
+            "app": "MerlitoMoney",
+            "backup_version": 1,
+            "exported_at": datetime.utcnow().isoformat() + "Z",
+            "tables": {
+                t: rows_to_dicts(conn.execute(f"SELECT * FROM {t}").fetchall())
+                for t in BACKUP_TABLES
+            },
+        }
+    filename = f"merlitomoney-backup-{date.today().isoformat()}.json"
+    return Response(
+        content=json.dumps(payload, indent=2), media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+class BackupImportIn(BaseModel):
+    password: str
+    data: dict
+
+
+@app.post("/api/backup/import")
+def import_backup(body: BackupImportIn, request: Request):
+    require_auth(request)
+    if not check_password(body.password):
+        raise HTTPException(status_code=400, detail="Wrong password")
+    tables = body.data.get("tables")
+    if not isinstance(tables, dict) or not any(t in tables for t in BACKUP_TABLES):
+        raise HTTPException(status_code=400, detail="This doesn't look like a MerlitoMoney backup file")
+    with get_conn() as conn:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        # Wipe children before parents (same order as /api/danger/delete-all),
+        # then restore parents before children so FKs are always satisfied.
+        for t in reversed(BACKUP_TABLES):
+            conn.execute(f"DELETE FROM {t}")
+        for t in BACKUP_TABLES:
+            rows = tables.get(t) or []
+            cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({t})")]
+            for row in rows:
+                if not isinstance(row, dict):
+                    raise HTTPException(status_code=400, detail=f"Malformed row in '{t}'")
+                present = [c for c in cols if c in row]
+                placeholders = ", ".join("?" for _ in present)
+                conn.execute(
+                    f"INSERT INTO {t} ({', '.join(present)}) VALUES ({placeholders})",
+                    tuple(row[c] for c in present),
+                )
+            if "id" in cols:
+                conn.execute(
+                    "UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX(id), 0) FROM " + t + ") WHERE name = ?",
+                    (t,),
+                )
+        bad = conn.execute("PRAGMA foreign_key_check").fetchall()
+        conn.execute("PRAGMA foreign_keys = ON")
+        if bad:
+            raise HTTPException(status_code=400, detail="Backup file failed referential integrity checks — nothing was changed")
     return {"ok": True}
 
 

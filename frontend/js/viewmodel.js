@@ -1,8 +1,8 @@
 import { state } from './state.js';
 import { TH, ACCENT, GREY } from './theme-runtime.js';
-import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS } from './constants.js';
+import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS, APP_VERSION } from './constants.js';
 import { render } from './render.js';
-import { reopenAccount, toggleNetWorthAction } from './actions.js';
+import { reopenAccount, toggleNetWorthAction, openAboutModal } from './actions.js';
 
 // ---------- helpers ported from the design ----------
 // Single source of truth for the number-format preference (comma-decimal
@@ -150,7 +150,8 @@ export function openModal(kind, editId, form) {
     loanCategory: (state.cats.find(c => c.name === 'Loan Interest') || state.cats.find(c => c.kind === 'expense') || {}).id || '',
     loanDay: '1', loanWeekendRule: 'none',
     extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10), extraPaymentRuleId: '',
-    extraPaymentFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || ''
+    extraPaymentFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '',
+    backupFileData: null, backupFileName: '', backupPassword: '', backupConfirm: ''
   }, form || {});
   render();
 }
@@ -642,7 +643,10 @@ export function computeView() {
     settings: ['Settings', ''],
     deleteAllData: ['Delete all data', ''],
     changePassword: ['Change password', ''],
-    extraPayment: ['Add extra payment', 'Add']
+    extraPayment: ['Add extra payment', 'Add'],
+    data: ['Data', ''],
+    backups: ['Backups', ''],
+    about: ['About', '']
   }[s.modal] || ['', ''];
   const deleteAccountTarget = s.modal === 'deleteAccount' ? acct(s.editId) : null;
   const deleteRecurringTarget = s.modal === 'deleteRecurring' ? s.recurring.find(r => r.id === s.editId) : null;
@@ -693,7 +697,11 @@ export function computeView() {
       onClick: () => openModal('budget', null, { category: c.id, limit: String(Math.max(50, Math.round((T.byCat[c.id] || 100) / M / 10) * 10)) })
     })),
     drawerOpen: s.drawerOpen,
-    drawerItems: [{ label: 'Data', icon: '#ic-db' }, { label: 'Backups', icon: '#ic-refresh' }, { label: 'About', icon: '#ic-info' }],
+    drawerItems: [
+      { label: 'Data', icon: '#ic-db', onClick: () => openModal('data') },
+      { label: 'Backups', icon: '#ic-refresh', onClick: () => openModal('backups') },
+      { label: 'About', icon: '#ic-info', onClick: () => openAboutModal() }
+    ],
     showModal: !!s.modal, isMovementModal: s.modal === 'movement', isAccountModal: s.modal === 'account',
     isCatModal: s.modal === 'category', isBudgetModal: s.modal === 'budget', isSettingsModal: s.modal === 'settings',
     isDeleteAccountModal: s.modal === 'deleteAccount',
@@ -709,6 +717,9 @@ export function computeView() {
     isDeleteAllDataModal: s.modal === 'deleteAllData', isChangePasswordModal: s.modal === 'changePassword',
     formDangerPassword: s.form.dangerPassword, formDangerConfirm: s.form.dangerConfirm,
     formCurrentPassword: s.form.currentPassword, formNewPassword: s.form.newPassword, formConfirmNewPassword: s.form.confirmNewPassword,
+    isDataModal: s.modal === 'data', isBackupsModal: s.modal === 'backups', isAboutModal: s.modal === 'about',
+    formBackupFileName: s.form.backupFileName, formBackupPassword: s.form.backupPassword, formBackupConfirm: s.form.backupConfirm,
+    appVersion: APP_VERSION, swInfo: s.swInfo,
     isExtraPaymentModal: s.modal === 'extraPayment',
     extraPaymentAccountName: extraPaymentTarget ? extraPaymentTarget.name : '',
     extraPaymentOwed: extraPaymentTarget ? money(Math.max(0, -extraPaymentTarget.balance)) : '',

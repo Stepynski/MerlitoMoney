@@ -4,7 +4,7 @@ import { THEME_STYLES, THEMES } from './themes.js';
 import { saveThemePref } from './state.js';
 import { RED } from './constants.js';
 import { computeView, set, openModal, shiftPeriod, unbudgeted } from './viewmodel.js';
-import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction } from './actions.js';
+import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction, downloadTransactionsCsv, downloadBackup, pickBackupFile, restoreBackupAction, openAboutModal } from './actions.js';
 
 // ---------- event delegation ----------
 export let handlers = [];
@@ -99,6 +99,10 @@ export function render() {
   if (loanTermInput) loanTermInput.addEventListener('input', e => set('loanTermMonths', e.target.value));
   const extraPaymentAmountInput = root.querySelector('#f-extra-payment-amount');
   if (extraPaymentAmountInput) extraPaymentAmountInput.addEventListener('input', e => set('extraPaymentAmount', e.target.value));
+  const backupPwInput = root.querySelector('#f-backup-password');
+  if (backupPwInput) backupPwInput.addEventListener('input', e => set('backupPassword', e.target.value));
+  const backupConfirmInput = root.querySelector('#f-backup-confirm');
+  if (backupConfirmInput) backupConfirmInput.addEventListener('input', e => set('backupConfirm', e.target.value));
   const pwInput = root.querySelector('#f-password');
   if (pwInput) pwInput.focus();
 }
@@ -626,7 +630,7 @@ export function renderApp() {
           <svg width="21" height="21" style="color:${GREY}"><use href="#ic-gear"></use></svg>Settings
         </button>
         ${V.drawerItems.map(d => `
-          <button data-click="${H(() => { state.drawerOpen = false; render(); })}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px">
+          <button data-click="${H(() => d.onClick())}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px">
             <svg width="21" height="21" style="color:${GREY}"><use href="${d.icon}"></use></svg>${d.label}
           </button>`).join('')}
         <button data-click="${H(() => logoutAction())}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${RED};margin-top:auto">
@@ -641,7 +645,7 @@ export function renderApp() {
         <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:${TH.surface2};z-index:2">
           <button data-click="${H(() => { console.log('[mm debug] modal closed via X button, modal was', state.modal); state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
           <span style="font-size:19px;font-weight:700;flex:1">${V.modalTitle}</span>
-          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal || V.isDeleteMovementModal || V.isDeleteAllDataModal || V.isChangePasswordModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
+          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal || V.isDeleteMovementModal || V.isDeleteAllDataModal || V.isChangePasswordModal || V.isDataModal || V.isBackupsModal || V.isAboutModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
         </div>
         <div style="padding:0 18px 20px;display:flex;flex-direction:column;gap:14px">
           ${V.isDeleteAccountModal ? `
@@ -973,13 +977,13 @@ export function renderApp() {
             </div>
             <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em;padding:2px 2px 0">Data</span>
             <div style="display:flex;flex-direction:column;gap:2px;background:${TH.surface};border-radius:14px;overflow:hidden">
-              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+              <button data-click="${H(() => openModal('data'))}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
                 <svg width="20" height="20" style="color:${GREY}"><use href="#ic-db"></use></svg>Data
               </button>
-              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+              <button data-click="${H(() => openModal('backups'))}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
                 <svg width="20" height="20" style="color:${GREY}"><use href="#ic-refresh"></use></svg>Backups
               </button>
-              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+              <button data-click="${H(() => openAboutModal())}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
                 <svg width="20" height="20" style="color:${GREY}"><use href="#ic-info"></use></svg>About
               </button>
             </div>
@@ -1018,6 +1022,65 @@ export function renderApp() {
               </label>
               ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
               <button data-click="${H(() => deleteAllDataAction())}" style="border:0;background:${RED};color:#fff;border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Permanently delete everything</button>
+            </div>` : ''}
+
+          ${V.isDataModal ? `
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <p style="margin:0;font-size:13.5px;color:${GREY};line-height:1.5">Download your full movement ledger as a spreadsheet-friendly CSV file — every expense, income, and transfer, with account and category names resolved.</p>
+              <button data-click="${H(() => downloadTransactionsCsv())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                <svg width="18" height="18"><use href="#ic-download"></use></svg>Download movements (.csv)
+              </button>
+            </div>` : ''}
+
+          ${V.isBackupsModal ? `
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <span style="font-weight:700;font-size:15px">Export a backup</span>
+                <p style="margin:0;font-size:13.5px;color:${GREY};line-height:1.5">Downloads everything — accounts, categories, movements, budgets, and recurring rules — as one JSON file. Keep it somewhere safe.</p>
+                <button data-click="${H(() => downloadBackup())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                  <svg width="18" height="18"><use href="#ic-download"></use></svg>Download backup (.json)
+                </button>
+              </div>
+              <div style="height:1px;background:${TH.border}"></div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <span style="font-weight:700;font-size:15px;color:${RED}">Restore from a backup</span>
+                <p style="margin:0;font-size:13.5px;color:${GREY};line-height:1.5">This replaces everything currently in the app with the contents of the backup file. This cannot be undone.</p>
+                <input type="file" accept="application/json" id="f-backup-file" data-change="${H(e => pickBackupFile(e.target.files[0]))}" style="display:none">
+                <label for="f-backup-file" style="border:1px solid ${TH.border};background:${TH.surface};color:${TH.text};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                  <svg width="18" height="18"><use href="#ic-upload"></use></svg>${V.formBackupFileName ? 'Selected: ' + esc(V.formBackupFileName) : 'Choose backup file…'}
+                </label>
+                ${V.formBackupFileName ? `
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Password
+                    <input id="f-backup-password" type="password" value="${esc(V.formBackupPassword)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+                  </label>
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Type RESTORE to confirm
+                    <input id="f-backup-confirm" value="${esc(V.formBackupConfirm)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+                  </label>
+                  ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
+                  <button data-click="${H(() => restoreBackupAction())}" style="border:0;background:${RED};color:#fff;border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Restore — replace everything</button>
+                ` : ''}
+              </div>
+            </div>` : ''}
+
+          ${V.isAboutModal ? `
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px 0">
+                <span style="width:56px;height:56px;border-radius:18px;background:#ffd43b;display:grid;place-items:center;overflow:hidden"><img src="cat-logo.png" alt="" style="width:74%;height:74%;object-fit:contain"></span>
+                <span style="font-weight:700;font-size:17px">MerlitoMoney</span>
+                <span style="font-size:13px;color:${GREY}">Version ${esc(V.appVersion)}</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;background:${TH.surface};border-radius:14px;padding:14px 16px">
+                <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em">Offline support</span>
+                ${V.swInfo ? `
+                  <span style="font-size:13.5px">${V.swInfo.registered
+                    ? `Service worker active — ${esc(V.swInfo.state)}${V.swInfo.updateAvailable ? ' (update waiting — reload to apply)' : ''}`
+                    : (V.swInfo.supported ? 'No service worker registered yet' : 'Not supported in this browser')}</span>
+                ` : `<span style="font-size:13.5px;color:${GREY}">Checking…</span>`}
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em">Open source</span>
+                <p style="margin:0;font-size:13px;color:${GREY};line-height:1.6">MerlitoMoney is a self-hosted, single-user budgeting app. It's built with FastAPI, Starlette, Uvicorn and Pydantic (Python) and vanilla JavaScript with no frontend build step — all MIT/BSD-licensed open source. No analytics, no external services, no accounts beyond your own.</p>
+              </div>
             </div>` : ''}
         </div>
       </div>

@@ -13,7 +13,7 @@ export const state = {
   mode: 'month', anchor: new Date(), view: 'expenses', balanceTab: 'movements',
   fAccounts: [], fTypes: [], fCats: [], filtersOpen: false,
   narrow: window.matchMedia('(max-width: 859px)').matches,
-  drawerOpen: false, modal: null, editId: null, formError: '',
+  drawerOpen: false, modal: null, editId: null, formError: '', swInfo: null,
   themeStyle: loadThemePref('mm_theme_style', 'colorful'),
   themeMode: loadThemePref('mm_theme_mode', window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
   numberFormat: loadThemePref('mm_number_format', 'comma'),
@@ -25,7 +25,8 @@ export const state = {
     dangerPassword: '', dangerConfirm: '', currentPassword: '', newPassword: '', confirmNewPassword: '',
     autopayEnabled: false, autopayFrom: '', autopayDay: '1', autopayWeekendRule: 'none',
     loanFrom: '', loanRate: '', loanTermMonths: '', loanCategory: '', loanDay: '1', loanWeekendRule: 'none',
-    extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10), extraPaymentRuleId: '', extraPaymentFrom: ''
+    extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10), extraPaymentRuleId: '', extraPaymentFrom: '',
+    backupFileData: null, backupFileName: '', backupPassword: '', backupConfirm: ''
   }
 };
 

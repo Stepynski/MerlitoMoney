@@ -1,7 +1,7 @@
 import { state } from './state.js';
 import { api, loadAll } from './api.js';
 import { render } from './render.js';
-import { num, unbudgeted, acct } from './viewmodel.js';
+import { num, unbudgeted, acct, openModal } from './viewmodel.js';
 import { PAL } from './constants.js';
 
 // ---------- mutations (call the API, then reload + render) ----------
@@ -227,4 +227,63 @@ export async function changePasswordAction() {
   }
   state.modal = null; state.formError = '';
   render();
+}
+export function downloadTransactionsCsv() {
+  window.location.href = '/api/export/transactions.csv';
+}
+export function downloadBackup() {
+  window.location.href = '/api/backup/export';
+}
+export function pickBackupFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      state.form.backupFileData = JSON.parse(reader.result);
+      state.form.backupFileName = file.name;
+      state.formError = '';
+    } catch (e) {
+      state.form.backupFileData = null;
+      state.form.backupFileName = '';
+      state.formError = 'That file is not valid JSON';
+    }
+    render();
+  };
+  reader.readAsText(file);
+}
+export async function restoreBackupAction() {
+  const f = state.form;
+  if (!f.backupFileData) { state.formError = 'Choose a backup file first'; render(); return; }
+  if (f.backupConfirm !== 'RESTORE') { state.formError = 'Type RESTORE to confirm'; render(); return; }
+  try {
+    await api('/api/backup/import', { method: 'POST', body: JSON.stringify({ password: f.backupPassword, data: f.backupFileData }) });
+  } catch (e) {
+    try { state.formError = JSON.parse(e.message).detail; } catch (_) { state.formError = 'Restore failed'; }
+    render();
+    return;
+  }
+  state.modal = null; state.formError = '';
+  await loadAll();
+  state.page = 'overview';
+  render();
+}
+export async function refreshSwStatus() {
+  const info = { supported: 'serviceWorker' in navigator, registered: false };
+  if (info.supported) {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        info.registered = true;
+        info.state = (reg.active && reg.active.state) || (reg.installing && reg.installing.state) || (reg.waiting && reg.waiting.state) || 'unknown';
+        info.updateAvailable = !!reg.waiting;
+      }
+    } catch (e) { /* ignore */ }
+  }
+  state.swInfo = info;
+  render();
+}
+export function openAboutModal() {
+  state.swInfo = null;
+  openModal('about');
+  refreshSwStatus();
 }
