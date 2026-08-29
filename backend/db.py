@@ -45,21 +45,28 @@ def rows_to_dicts(rows):
     return [dict(r) for r in rows]
 
 
-# (name, kind, icon, color) — a sensible default budgeting category set,
-# only seeded into a brand-new (empty) database, never overwriting a
-# user's own categories.
+# (name, kind, icon, color) — a personal-finance-standard budgeting category
+# set (the categories most household budgets track, split so fixed costs
+# aren't lumped in with discretionary ones), only seeded into a brand-new
+# (empty) database, never overwriting a user's own categories.
 DEFAULT_CATEGORIES = [
+    ("Housing", "expense", "ic-home", "#7048c8"),
+    ("Utilities", "expense", "ic-bulb", "#f2a25c"),
     ("Groceries", "expense", "ic-cart", "#4caf50"),
     ("Dining Out", "expense", "ic-fork", "#f4703a"),
     ("Transport", "expense", "ic-car", "#1f6fd0"),
-    ("Shopping", "expense", "ic-bag", "#ef5b8c"),
     ("Health & Wellness", "expense", "ic-health", "#12897f"),
-    ("Housing & Utilities", "expense", "ic-home", "#7048c8"),
-    ("Entertainment", "expense", "ic-play", "#26aee8"),
-    ("Gifts & Donations", "expense", "ic-gift", "#e8a33d"),
+    ("Shopping", "expense", "ic-bag", "#ef5b8c"),
+    ("Entertainment & Subscriptions", "expense", "ic-play", "#26aee8"),
+    ("Personal Care", "expense", "ic-scissors", "#e8a33d"),
+    ("Insurance", "expense", "ic-shield", "#a531b5"),
+    ("Education", "expense", "ic-graduation", "#5b46b8"),
+    ("Gifts & Donations", "expense", "ic-gift", "#c0173f"),
+    ("Savings & Investments", "expense", "ic-piggy", "#b6d334"),
     ("Other Expenses", "expense", "ic-dots", "#8b6ce0"),
     ("Salary", "income", "ic-salary", "#2f9e44"),
-    ("Freelance & Business", "income", "ic-bank", "#26aee8"),
+    ("Freelance & Business", "income", "ic-briefcase", "#26aee8"),
+    ("Investments & Interest", "income", "ic-chart", "#12897f"),
     ("Gifts Received", "income", "ic-gift", "#e8a33d"),
     ("Other Income", "income", "ic-dots", "#5b46b8"),
 ]
