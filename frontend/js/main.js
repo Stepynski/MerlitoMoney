@@ -4,6 +4,7 @@ import { render } from './render.js';
 
 // ---------- bootstrap ----------
 async function boot() {
+  console.log('[mm debug] boot() — fresh app load/reload');
   try {
     const me = await api('/api/me');
     if (me.authed) { state.authed = true; await loadAll(); }

@@ -47,6 +47,7 @@ export function themeSettingsHtml() {
 
 // ---------- rendering ----------
 export function render() {
+  console.log('[mm debug] render()', { page: state.page, modal: state.modal, editId: state.editId, narrow: state.narrow });
   applyTheme();
   handlers = [];
   const root = document.getElementById('root');
@@ -158,7 +159,7 @@ export function renderApp() {
               <button data-click="${H(a.onDelete)}" aria-label="Delete ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-trash"></use></svg></button>
             </div>`).join('')}
         </section>`).join('')}
-      <button data-click="${H(() => openModal('account'))}" style="align-self:flex-start;border:1px solid ${TH.border};background:${TH.surface};border-radius:12px;padding:11px 18px;cursor:pointer;font-weight:600;color:${ACCENT};display:flex;align-items:center;gap:8px">
+      <button data-click="${H(() => { console.log('[mm debug] Add account clicked, page is', state.page); openModal('account'); })}" style="align-self:flex-start;border:1px solid ${TH.border};background:${TH.surface};border-radius:12px;padding:11px 18px;cursor:pointer;font-weight:600;color:${ACCENT};display:flex;align-items:center;gap:8px">
         <svg width="18" height="18"><use href="#ic-plus"></use></svg>Add account
       </button>
       ${V.closedAccounts.length ? `
@@ -512,10 +513,10 @@ export function renderApp() {
     </div>`;
 
   const modal = !V.showModal ? '' : `
-    <div data-click="${H(() => { state.modal = null; render(); })}" style="position:fixed;inset:0;z-index:70;background:rgba(20,24,32,0.42);display:flex;align-items:center;justify-content:center;padding:16px;animation:kb-in .16s ease both">
+    <div data-click="${H(() => { console.log('[mm debug] modal closed via backdrop, modal was', state.modal); state.modal = null; render(); })}" style="position:fixed;inset:0;z-index:70;background:rgba(20,24,32,0.42);display:flex;align-items:center;justify-content:center;padding:16px;animation:kb-in .16s ease both">
       <div data-click="${H(e => e.stopPropagation())}" style="background:${TH.surface2};border-radius:22px;width:100%;max-width:460px;max-height:88vh;overflow:auto;box-shadow:0 24px 60px rgba(16,24,40,0.3);animation:kb-up .2s ease both">
         <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:${TH.surface2};z-index:2">
-          <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
+          <button data-click="${H(() => { console.log('[mm debug] modal closed via X button, modal was', state.modal); state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
           <span style="font-size:19px;font-weight:700;flex:1">${V.modalTitle}</span>
           ${V.isSettingsModal || V.isDeleteAccountModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
         </div>
