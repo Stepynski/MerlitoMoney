@@ -16,7 +16,7 @@ export const state = {
   drawerOpen: false, modal: null, editId: null, formError: '',
   themeStyle: loadThemePref('mm_theme_style', 'colorful'),
   themeMode: loadThemePref('mm_theme_mode', window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
-  form: { name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '' }
+  form: { name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '' }
 };
 
 // Debug instrumentation: state.page is the one piece of state a user has

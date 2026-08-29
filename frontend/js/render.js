@@ -73,6 +73,8 @@ export function render() {
   if (limitInput) limitInput.addEventListener('input', e => set('limit', e.target.value));
   const ibanInput = root.querySelector('#f-iban');
   if (ibanInput) ibanInput.addEventListener('input', e => set('iban', e.target.value));
+  const noteInput = root.querySelector('#f-note');
+  if (noteInput) noteInput.addEventListener('input', e => set('note', e.target.value));
   const pwInput = root.querySelector('#f-password');
   if (pwInput) pwInput.focus();
 }
@@ -273,6 +275,7 @@ export function renderApp() {
                   <span style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:${GREY}">
                     <svg width="13" height="13"><use href="${t.accountIcon}"></use></svg>${t.account}
                   </span>
+                  ${t.note ? `<span style="font-size:12.5px;color:${TH.textFaint};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.note)}</span>` : ''}
                 </span>
                 <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none">
                   <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${t.amountColor}">${t.amount}</span>
@@ -419,7 +422,7 @@ export function renderApp() {
               <span style="width:34px;height:34px;border-radius:50%;background:${t.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="16" height="16"><use href="${t.icon}"></use></svg></span>
               <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
                 <span style="font-weight:600;font-size:13.5px">${t.title}</span>
-                <span style="font-size:12px;color:${GREY}">${t.account} · ${t.date}</span>
+                <span style="font-size:12px;color:${GREY};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.account} · ${t.date}${t.note ? ' · ' + esc(t.note) : ''}</span>
               </span>
               <span style="font-weight:600;font-variant-numeric:tabular-nums;color:${t.amountColor};flex:none">${t.amount}</span>
             </div>`).join('') : `<div style="padding:24px 16px;text-align:center;color:${GREY};font-size:13.5px">No movements yet.</div>`}
@@ -568,6 +571,9 @@ export function renderApp() {
                     ${V.toAccountOptions.map(o => `<option value="${o.v}" ${o.v === V.formToAccount ? 'selected' : ''}>${o.l}</option>`).join('')}
                   </select>
                 </label>` : ''}
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Description (optional)
+                <input id="f-note" value="${esc(V.formNote)}" placeholder="e.g. Weekly groceries" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+              </label>
             </div>` : ''}
 
           ${V.isAccountModal ? `

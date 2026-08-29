@@ -56,7 +56,8 @@ export async function submitModal(f) {
       to_account_id: isTransfer && f.toAccount ? f.toAccount : null,
       type: f.movement,
       category_id: (f.movement === 'Expense' || f.movement === 'Income') ? (f.category || null) : null,
-      amount: num(f.amount)
+      amount: num(f.amount),
+      note: f.note && f.note.trim() ? f.note.trim() : null
     };
     await api('/api/transactions', { method: 'POST', body: JSON.stringify(body) });
     state.page = 'balance';

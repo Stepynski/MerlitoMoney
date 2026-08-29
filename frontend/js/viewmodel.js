@@ -73,7 +73,7 @@ export function toggle(key, id) {
 }
 export function openModal(kind, editId, form) {
   state.modal = kind; state.editId = editId || null; state.drawerOpen = false; state.formError = '';
-  state.form = Object.assign({ name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '' }, form || {});
+  state.form = Object.assign({ name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '', icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '' }, form || {});
   render();
 }
 
@@ -188,7 +188,7 @@ export function computeView() {
       title: c ? c.name : (t.type === 'Transfer internal' ? 'Internal transfer' : 'External transfer'),
       icon: '#' + (c ? c.icon : 'ic-transfer'), color: c ? c.color : GREY,
       account: a ? a.name : '—', accountIcon: '#' + (a ? a.icon : 'ic-wallet'),
-      amount: money(isExp ? -t.amount : t.amount, isInc), type: t.type,
+      amount: money(isExp ? -t.amount : t.amount, isInc), type: t.type, note: t.note || '',
       amountColor: isExp ? RED : isInc ? GREEN : GREY
     });
   });
@@ -310,7 +310,7 @@ export function computeView() {
     return {
       title: c ? c.name : (t.type === 'Transfer internal' ? 'Internal transfer' : 'External transfer'),
       icon: '#' + (c ? c.icon : 'ic-transfer'), color: c ? c.color : GREY,
-      account: a ? a.name : '—', date: dm(t._date).slice(0, 5),
+      account: a ? a.name : '—', date: dm(t._date).slice(0, 5), note: t.note || '',
       amount: money(isExp ? -t.amount : t.amount, isInc), amountColor: isExp ? RED : isInc ? GREEN : GREY
     };
   });
@@ -380,7 +380,7 @@ export function computeView() {
     })),
     accountOptions: s.accounts.filter(a => a.active).map(a => ({ v: a.id, l: a.name + ' · ' + money(a.balance) })),
     toAccountOptions: s.accounts.filter(a => a.active && a.id !== s.form.account).map(a => ({ v: a.id, l: a.name })),
-    formAmount: s.form.amount, formAccount: s.form.account, formToAccount: s.form.toAccount,
+    formAmount: s.form.amount, formAccount: s.form.account, formToAccount: s.form.toAccount, formNote: s.form.note,
     accountKinds: [['spend', 'Account', 'ic-wallet'], ['save', 'Savings account', 'ic-piggy']].map(k => ({
       value: k[0], label: k[1], icon: '#' + k[2],
       ring: s.form.kind === k[0] ? ACCENT : TH.border, dot: s.form.kind === k[0] ? ACCENT : 'transparent'
