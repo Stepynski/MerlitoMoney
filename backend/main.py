@@ -95,6 +95,7 @@ class AccountPatch(BaseModel):
     goal_amount: Optional[float] = None
     iban: Optional[str] = None
     bank_connection_id: Optional[str] = None
+    active: Optional[bool] = None
 
 
 def _clean_iban(raw: Optional[str]) -> Optional[str]:
@@ -152,7 +153,7 @@ def create_account(body: AccountIn, request: Request):
 @app.patch("/api/accounts/{account_id}")
 def update_account(account_id: int, body: AccountPatch, request: Request):
     require_auth(request)
-    fields = {k: v for k, v in body.dict().items() if v is not None}
+    fields = body.dict(exclude_unset=True)
     if "iban" in fields:
         fields["iban"] = _clean_iban(fields["iban"])
     if not fields:
@@ -173,6 +174,10 @@ def update_account(account_id: int, body: AccountPatch, request: Request):
 def delete_account(account_id: int, request: Request):
     require_auth(request)
     with get_conn() as conn:
+        # Transactions FK-reference accounts with no ON DELETE action, so any
+        # transaction touching this account (either side of a transfer) must
+        # go first, or the DELETE below fails under PRAGMA foreign_keys = ON.
+        conn.execute("DELETE FROM transactions WHERE account_id = ? OR to_account_id = ?", (account_id, account_id))
         conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
     return {"ok": True}
 

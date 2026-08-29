@@ -1,7 +1,7 @@
 import { state } from './state.js';
 import { api, loadAll } from './api.js';
 import { render } from './render.js';
-import { num, unbudgeted } from './viewmodel.js';
+import { num, unbudgeted, acct } from './viewmodel.js';
 import { PAL } from './constants.js';
 
 // ---------- mutations (call the API, then reload + render) ----------
@@ -23,17 +23,22 @@ export async function submit() {
 export async function submitModal(f) {
   if (state.modal === 'account') {
     const isSave = f.kind === 'save';
+    const editing = acct(state.editId);
     const body = {
       name: f.name.trim() || 'New account',
       type: isSave ? 'Savings' : f.type,
       icon: isSave ? 'ic-piggy' : (f.type === 'Cash' ? 'ic-cash' : f.type === 'Wallet' ? 'ic-wallet' : 'ic-bank'),
-      color: isSave ? '#40c057' : PAL[state.accounts.length % PAL.length],
+      color: isSave ? '#40c057' : (editing ? editing.color : PAL[state.accounts.length % PAL.length]),
       grp: isSave ? 'save' : 'spend',
       starting_balance: num(f.balance),
       goal_amount: isSave && num(f.goal) > 0 ? num(f.goal) : null,
       iban: f.iban ? f.iban.trim() : null
     };
-    await api('/api/accounts', { method: 'POST', body: JSON.stringify(body) });
+    if (editing) {
+      await api('/api/accounts/' + editing.id, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      await api('/api/accounts', { method: 'POST', body: JSON.stringify(body) });
+    }
   } else if (state.modal === 'budget') {
     const id = f.category || ((unbudgeted()[0] || {}).id);
     if (id) await api('/api/budgets', { method: 'POST', body: JSON.stringify({ category_id: id, monthly_limit: num(f.limit) || 100 }) });
@@ -66,6 +71,23 @@ export async function deleteCategoryAction() {
 export async function removeBudgetAction() {
   await api('/api/budgets/' + state.editId, { method: 'DELETE' });
   state.modal = null;
+  await loadAll();
+  render();
+}
+export async function closeAccountAction() {
+  await api('/api/accounts/' + state.editId, { method: 'PATCH', body: JSON.stringify({ active: false }) });
+  state.modal = null;
+  await loadAll();
+  render();
+}
+export async function deleteAccountAction() {
+  await api('/api/accounts/' + state.editId, { method: 'DELETE' });
+  state.modal = null;
+  await loadAll();
+  render();
+}
+export async function reopenAccount(id) {
+  await api('/api/accounts/' + id, { method: 'PATCH', body: JSON.stringify({ active: true }) });
   await loadAll();
   render();
 }

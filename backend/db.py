@@ -19,6 +19,7 @@ def _migrate(conn):
     for stmt in (
         "ALTER TABLE accounts ADD COLUMN iban TEXT",
         "ALTER TABLE accounts ADD COLUMN bank_connection_id TEXT",
+        "ALTER TABLE accounts ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
     ):
         try:
             conn.execute(stmt)

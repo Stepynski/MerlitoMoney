@@ -4,7 +4,7 @@ import { THEME_STYLES, THEMES } from './themes.js';
 import { saveThemePref } from './state.js';
 import { RED } from './constants.js';
 import { computeView, set, openModal, shiftPeriod, unbudgeted } from './viewmodel.js';
-import { submit, deleteCategoryAction, removeBudgetAction, logoutAction } from './actions.js';
+import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, logoutAction } from './actions.js';
 
 // ---------- event delegation ----------
 export let handlers = [];
@@ -135,28 +135,48 @@ export function renderApp() {
             <span style="font-weight:600;color:#2f9e44;font-variant-numeric:tabular-nums">${g.total}</span>
           </div>
           ${g.items.map(a => `
-            <button data-click="${H(a.onClick)}" style="width:100%;text-align:left;border:0;border-bottom:1px solid ${TH.border};background:${TH.surface};padding:14px 18px;display:flex;align-items:center;gap:14px;cursor:pointer">
-              <span style="width:42px;height:42px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="21" height="21"><use href="${a.icon}"></use></svg></span>
-              <span style="flex:1;display:flex;flex-direction:column;gap:3px;min-width:0">
-                <span style="display:flex;align-items:baseline;gap:8px">
-                  <span style="font-weight:600">${a.name}</span>
-                  <span style="font-size:12px;color:${GREY}">${a.type}</span>
+            <div style="width:100%;border-bottom:1px solid ${TH.border};background:${TH.surface};display:flex;align-items:center;gap:2px;padding:6px 10px 6px 18px">
+              <button data-click="${H(a.onClick)}" style="flex:1;min-width:0;text-align:left;border:0;background:transparent;padding:8px 0;display:flex;align-items:center;gap:14px;cursor:pointer">
+                <span style="width:42px;height:42px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="21" height="21"><use href="${a.icon}"></use></svg></span>
+                <span style="flex:1;display:flex;flex-direction:column;gap:3px;min-width:0">
+                  <span style="display:flex;align-items:baseline;gap:8px">
+                    <span style="font-weight:600">${a.name}</span>
+                    <span style="font-size:12px;color:${GREY}">${a.type}</span>
+                  </span>
+                  <span style="font-weight:600;color:#2f9e44;font-variant-numeric:tabular-nums">${a.balance}</span>
+                  ${a.hasGoal ? `
+                    <span style="display:flex;align-items:center;gap:9px;margin-top:2px">
+                      <span style="flex:1;height:7px;border-radius:4px;background:#e9ebef;overflow:hidden;display:block">
+                        <span style="display:block;height:100%;width:${a.goalPct};background:#40c057"></span>
+                      </span>
+                      <span style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${a.goalLabel}</span>
+                    </span>` : ''}
                 </span>
-                <span style="font-weight:600;color:#2f9e44;font-variant-numeric:tabular-nums">${a.balance}</span>
-                ${a.hasGoal ? `
-                  <span style="display:flex;align-items:center;gap:9px;margin-top:2px">
-                    <span style="flex:1;height:7px;border-radius:4px;background:#e9ebef;overflow:hidden;display:block">
-                      <span style="display:block;height:100%;width:${a.goalPct};background:#40c057"></span>
-                    </span>
-                    <span style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${a.goalLabel}</span>
-                  </span>` : ''}
-              </span>
-              <span style="font-size:12px;color:${TH.textFaint};text-align:right;flex:none">${a.meta}</span>
-            </button>`).join('')}
+                <span style="font-size:12px;color:${TH.textFaint};text-align:right;flex:none">${a.meta}</span>
+              </button>
+              <button data-click="${H(a.onEdit)}" aria-label="Edit ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-edit"></use></svg></button>
+              <button data-click="${H(a.onDelete)}" aria-label="Delete ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-trash"></use></svg></button>
+            </div>`).join('')}
         </section>`).join('')}
       <button data-click="${H(() => openModal('account'))}" style="align-self:flex-start;border:1px solid ${TH.border};background:${TH.surface};border-radius:12px;padding:11px 18px;cursor:pointer;font-weight:600;color:${ACCENT};display:flex;align-items:center;gap:8px">
         <svg width="18" height="18"><use href="#ic-plus"></use></svg>Add account
       </button>
+      ${V.closedAccounts.length ? `
+        <section style="display:flex;flex-direction:column;gap:8px">
+          <span style="font-weight:600;font-size:13px;color:${GREY};padding:0 4px">Closed accounts</span>
+          <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+            ${V.closedAccounts.map(a => `
+              <div style="width:100%;border-bottom:1px solid ${TH.border};display:flex;align-items:center;gap:10px;padding:10px 12px 10px 18px;opacity:0.7">
+                <span style="width:34px;height:34px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="16" height="16"><use href="${a.icon}"></use></svg></span>
+                <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+                  <span style="font-weight:600;font-size:13.5px">${a.name}</span>
+                  <span style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${a.balance}</span>
+                </span>
+                <button data-click="${H(a.onReopen)}" style="border:0;background:transparent;color:${ACCENT};font-weight:600;font-size:12.5px;cursor:pointer;padding:6px 8px;flex:none">Reopen</button>
+                <button data-click="${H(a.onDelete)}" aria-label="Delete ${esc(a.name)}" style="border:0;background:transparent;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="15" height="15"><use href="#ic-trash"></use></svg></button>
+              </div>`).join('')}
+          </div>
+        </section>` : ''}
     </div>`;
 
   const categoriesPage = !V.isCategories ? '' : `
@@ -497,9 +517,19 @@ export function renderApp() {
         <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:${TH.surface2};z-index:2">
           <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
           <span style="font-size:19px;font-weight:700;flex:1">${V.modalTitle}</span>
-          ${V.isSettingsModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
+          ${V.isSettingsModal || V.isDeleteAccountModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
         </div>
         <div style="padding:0 18px 20px;display:flex;flex-direction:column;gap:14px">
+          ${V.isDeleteAccountModal ? `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <p style="margin:0;font-size:14px;color:${GREY};line-height:1.5">
+                <strong style="color:${TH.text}">${esc(V.deleteAccountName)}</strong> has ${V.deleteAccountMovCount} movement${V.deleteAccountMovCount === 1 ? '' : 's'}. Closing keeps all of them and your net worth history intact — the account just won't accept new movements. Deleting removes the account and every one of its movements. This cannot be undone.
+              </p>
+              <button data-click="${H(() => closeAccountAction())}" style="border:1px solid ${TH.border};background:${TH.surface};color:${TH.text};border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Close account — keep history</button>
+              <button data-click="${H(() => deleteAccountAction())}" style="border:0;background:${TH.surface};color:${RED};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                <svg width="18" height="18"><use href="#ic-trash"></use></svg>Delete account &amp; all movements
+              </button>
+            </div>` : ''}
           ${V.isMovementModal ? `
             <div style="display:flex;flex-direction:column;gap:14px">
               <div style="display:flex;gap:6px;border-bottom:1px solid ${TH.border}">

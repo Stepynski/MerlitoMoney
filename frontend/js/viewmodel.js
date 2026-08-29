@@ -2,6 +2,7 @@ import { state } from './state.js';
 import { TH, ACCENT, GREY } from './theme-runtime.js';
 import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS } from './constants.js';
 import { render } from './render.js';
+import { reopenAccount } from './actions.js';
 
 // ---------- helpers ported from the design ----------
 export function money(v, plus) {
@@ -113,10 +114,14 @@ export function computeView() {
     }));
   }
 
+  const editAccount = a => openModal('account', a.id, {
+    name: a.name, type: a.type, balance: String(a.starting_balance),
+    goal: a.goal_amount ? String(a.goal_amount) : '', kind: a.grp, iban: a.iban || ''
+  });
   const accountGroups = [
     { key: 'spend', title: 'Accounts' }, { key: 'save', title: 'Savings accounts' }
   ].map(g => {
-    const items = s.accounts.filter(a => a.grp === g.key);
+    const items = s.accounts.filter(a => a.grp === g.key && a.active);
     return {
       title: g.title, total: money(items.reduce((x, a) => x + a.balance, 0)),
       items: items.map(a => {
@@ -126,11 +131,18 @@ export function computeView() {
           hasGoal: !!a.goal_amount, goalPct: a.goal_amount ? Math.min(100, a.balance / a.goal_amount * 100) + '%' : '0%',
           goalLabel: a.goal_amount ? Math.round(a.balance / a.goal_amount * 100) + '% of ' + short(a.goal_amount) : '',
           meta: own.length ? own.length + ' mov.' : 'new',
-          onClick: () => { s.page = 'balance'; s.fAccounts = [a.id]; s.filtersOpen = true; render(); }
+          onClick: () => { s.page = 'balance'; s.fAccounts = [a.id]; s.filtersOpen = true; render(); },
+          onEdit: () => editAccount(a),
+          onDelete: () => openModal('deleteAccount', a.id)
         };
       })
     };
   }).filter(g => g.items.length);
+  const closedAccounts = s.accounts.filter(a => !a.active).map(a => ({
+    name: a.name, icon: '#' + a.icon, color: a.color, balance: money(a.balance),
+    onReopen: () => reopenAccount(a.id),
+    onDelete: () => openModal('deleteAccount', a.id)
+  }));
 
   const kind = s.view === 'income' ? 'income' : 'expense';
   const donutBase = s.view === 'income' ? T.inc : T.exp;
@@ -304,11 +316,13 @@ export function computeView() {
   });
 
   const modalMeta = {
-    movement: ['New movement', 'Save'], account: ['New account', 'Save'],
+    movement: ['New movement', 'Save'], account: [s.editId ? 'Edit account' : 'New account', 'Save'],
     category: [s.editId ? 'Edit category' : 'New category', 'Apply'],
     budget: [s.editId ? 'Edit budget' : 'Set budget', 'Save'],
+    deleteAccount: ['Delete account', ''],
     settings: ['Settings', '']
   }[s.modal] || ['', ''];
+  const deleteAccountTarget = s.modal === 'deleteAccount' ? acct(s.editId) : null;
 
   return {
     isNarrow: s.narrow, isWide: !s.narrow,
@@ -327,7 +341,7 @@ export function computeView() {
     summaryCells: cells,
     isAccounts: s.page === 'accounts', isCategories: s.page === 'categories', isBalance: s.page === 'balance',
     isOverview: s.page === 'overview', isBudget: s.page === 'budget',
-    accountGroups,
+    accountGroups, closedAccounts,
     donut, donutLabel: s.view === 'income' ? 'Income' : 'Expenses', donutTotal: short(donutBase),
     legend, catSections,
     filtersOpen: s.filtersOpen,
@@ -350,6 +364,9 @@ export function computeView() {
     drawerItems: [{ label: 'Data', icon: '#ic-db' }, { label: 'Backups', icon: '#ic-refresh' }, { label: 'About', icon: '#ic-info' }],
     showModal: !!s.modal, isMovementModal: s.modal === 'movement', isAccountModal: s.modal === 'account',
     isCatModal: s.modal === 'category', isBudgetModal: s.modal === 'budget', isSettingsModal: s.modal === 'settings',
+    isDeleteAccountModal: s.modal === 'deleteAccount',
+    deleteAccountName: deleteAccountTarget ? deleteAccountTarget.name : '',
+    deleteAccountMovCount: deleteAccountTarget ? s.tx.filter(t => t.account_id === deleteAccountTarget.id || t.to_account_id === deleteAccountTarget.id).length : 0,
     modalTitle: modalMeta[0], modalCta: modalMeta[1],
     movementTabs: [['Expense', 'Expenses'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
       const on = s.form.movement === t[0];
@@ -361,8 +378,8 @@ export function computeView() {
       id: c.id, name: c.name, icon: '#' + c.icon, bg: c.color, color: '#fff',
       opacity: s.form.category === c.id ? '1' : '0.55'
     })),
-    accountOptions: s.accounts.map(a => ({ v: a.id, l: a.name + ' · ' + money(a.balance) })),
-    toAccountOptions: s.accounts.filter(a => a.id !== s.form.account).map(a => ({ v: a.id, l: a.name })),
+    accountOptions: s.accounts.filter(a => a.active).map(a => ({ v: a.id, l: a.name + ' · ' + money(a.balance) })),
+    toAccountOptions: s.accounts.filter(a => a.active && a.id !== s.form.account).map(a => ({ v: a.id, l: a.name })),
     formAmount: s.form.amount, formAccount: s.form.account, formToAccount: s.form.toAccount,
     accountKinds: [['spend', 'Account', 'ic-wallet'], ['save', 'Savings account', 'ic-piggy']].map(k => ({
       value: k[0], label: k[1], icon: '#' + k[2],

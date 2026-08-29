@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     starting_balance REAL NOT NULL DEFAULT 0,
     goal_amount REAL,
     iban TEXT,
-    bank_connection_id TEXT
+    bank_connection_id TEXT,
+    active INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS categories (
