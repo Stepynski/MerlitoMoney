@@ -135,6 +135,7 @@ class AccountIn(BaseModel):
     starting_balance: float = 0
     goal_amount: Optional[float] = None
     iban: Optional[str] = None
+    include_in_net_worth: Optional[bool] = None
 
 
 class AccountPatch(BaseModel):
@@ -148,6 +149,7 @@ class AccountPatch(BaseModel):
     iban: Optional[str] = None
     bank_connection_id: Optional[str] = None
     active: Optional[bool] = None
+    include_in_net_worth: Optional[bool] = None
 
 
 def _clean_iban(raw: Optional[str]) -> Optional[str]:
@@ -234,12 +236,19 @@ def list_accounts(request: Request):
 def create_account(body: AccountIn, request: Request):
     require_auth(request)
     iban = _clean_iban(body.iban)
+    # A mortgage/car loan is usually secured against an asset (a house, a
+    # car) this app has no way to track, so counting the full liability
+    # with no offsetting asset systematically understates net worth —
+    # default loans out, everything else in, but let the caller override.
+    include_in_net_worth = body.include_in_net_worth
+    if include_in_net_worth is None:
+        include_in_net_worth = body.grp != "loan"
     with get_conn() as conn:
         try:
             cur = conn.execute(
-                "INSERT INTO accounts (name, type, icon, color, grp, starting_balance, goal_amount, iban) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (body.name, body.type, body.icon, body.color, body.grp, body.starting_balance, body.goal_amount, iban),
+                "INSERT INTO accounts (name, type, icon, color, grp, starting_balance, goal_amount, iban, include_in_net_worth) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (body.name, body.type, body.icon, body.color, body.grp, body.starting_balance, body.goal_amount, iban, include_in_net_worth),
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=400, detail="This IBAN is already used by another account")

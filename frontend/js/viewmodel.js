@@ -2,15 +2,36 @@ import { state } from './state.js';
 import { TH, ACCENT, GREY } from './theme-runtime.js';
 import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS } from './constants.js';
 import { render } from './render.js';
-import { reopenAccount } from './actions.js';
+import { reopenAccount, toggleNetWorthAction } from './actions.js';
 
 // ---------- helpers ported from the design ----------
+// Single source of truth for the number-format preference (comma-decimal
+// "de-DE" vs point-decimal "en-US") so money()/num()/short() and every
+// other locale-aware formatter stay coherent with one setting.
+export function locale() { return state.numberFormat === 'point' ? 'en-US' : 'de-DE'; }
 export function money(v, plus) {
-  const s = Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const s = Math.abs(v).toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return (v < 0 ? '-' : plus && v > 0 ? '+' : '') + s + ' €';
 }
-export function short(v) { return Math.round(v).toLocaleString('de-DE') + ' €'; }
-export function num(v) { return parseFloat(String(v).replace(/\./g, '').replace(',', '.')) || 0; }
+export function short(v) { return Math.round(v).toLocaleString(locale()) + ' €'; }
+export function num(v) {
+  const s = String(v);
+  // 'point' mode: '.' is the decimal separator, ',' is the thousands
+  // separator (en-US convention) — the opposite of the default 'comma'
+  // mode (de-DE convention), where '.' is stripped as thousands and ','
+  // becomes the decimal point.
+  return state.numberFormat === 'point'
+    ? parseFloat(s.replace(/,/g, '')) || 0
+    : parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
+}
+// Formats a raw number for pre-filling an *editable* form field, in
+// exactly the format num() will parse back — money() already does this
+// correctly (that's why editRecurring/editMovement already round-trip
+// through it); this just saves repeating the "strip the currency
+// suffix" boilerplate at every call site, including non-currency values
+// like a percentage rate, since only the decimal/thousands convention
+// matters here, not the € sign.
+export function numStr(v) { return money(v).replace(' €', '').trim(); }
 export function dm(d) { return String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear(); }
 export function cat(id) { return state.cats.find(c => c.id === id); }
 export function acct(id) { return state.accounts.find(a => a.id === id); }
@@ -59,7 +80,7 @@ export function monthlyEquivalent(r) {
 }
 export function describeFrequency(r) {
   if (r.amount_mode === 'amortized') {
-    const rate = ((r.annual_rate || 0) * 100).toLocaleString('de-DE', { maximumFractionDigits: 2 });
+    const rate = ((r.annual_rate || 0) * 100).toLocaleString(locale(), { maximumFractionDigits: 2 });
     return `Amortized loan payment on the ${r.day_of_month}${r.day_of_month === 1 ? 'st' : r.day_of_month === 2 ? 'nd' : r.day_of_month === 3 ? 'rd' : 'th'} · ${rate}% fixed rate`;
   }
   const WD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -81,15 +102,30 @@ export function describeFrequency(r) {
 }
 export function netWorthHistory(monthsBack) {
   const s = state;
+  // Account-aware: a transaction's effect on the *counted* total depends
+  // on which side(s) of it touch an included account, not just its type.
+  // A transfer between two included accounts still nets to zero (money
+  // just moved within what you're counting); a transfer touching only
+  // one included side must move the total, not cancel out — e.g. paying
+  // down an excluded loan from an included checking account should
+  // reduce counted net worth by that amount.
+  const included = new Set(s.accounts.filter(a => a.include_in_net_worth).map(a => a.id));
   const sorted = s.tx.slice().sort((a, b) => a._date - b._date);
   const now = new Date();
-  let idx = 0, running = s.accounts.reduce((a, acc) => a + acc.starting_balance, 0);
+  let idx = 0, running = s.accounts.reduce((a, acc) => a + (included.has(acc.id) ? acc.starting_balance : 0), 0);
   const points = [];
   for (let i = monthsBack - 1; i >= 0; i--) {
     const boundary = i === 0 ? now : new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
     while (idx < sorted.length && sorted[idx]._date <= boundary) {
       const t = sorted[idx];
-      running += t.type === 'Income' ? t.amount : t.type === 'Transfer internal' ? 0 : -t.amount;
+      if (t.type === 'Income') {
+        if (included.has(t.account_id)) running += t.amount;
+      } else if (t.type === 'Transfer internal') {
+        if (included.has(t.account_id)) running -= t.amount;
+        if (t.to_account_id && included.has(t.to_account_id)) running += t.amount;
+      } else { // Expense, Transfer external
+        if (included.has(t.account_id)) running -= t.amount;
+      }
       idx++;
     }
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -113,7 +149,8 @@ export function openModal(kind, editId, form) {
     loanFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '', loanRate: '', loanTermMonths: '',
     loanCategory: (state.cats.find(c => c.name === 'Loan Interest') || state.cats.find(c => c.kind === 'expense') || {}).id || '',
     loanDay: '1', loanWeekendRule: 'none',
-    extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10), extraPaymentRuleId: ''
+    extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10), extraPaymentRuleId: '',
+    extraPaymentFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || ''
   }, form || {});
   render();
 }
@@ -122,7 +159,7 @@ export function openModal(kind, editId, form) {
 export function computeView() {
   const s = state, P = period(), T = totals(), M = months();
   const spendable = s.accounts.filter(a => a.grp === 'spend').reduce((x, a) => x + a.balance, 0);
-  const total = s.accounts.reduce((x, a) => x + a.balance, 0);
+  const total = s.accounts.filter(a => a.include_in_net_worth).reduce((x, a) => x + a.balance, 0);
   const saldo = T.inc - T.exp;
   const expView = s.view === 'expenses';
 
@@ -166,14 +203,14 @@ export function computeView() {
 
   const editAccount = a => openModal('account', a.id, {
     name: a.name, type: a.type,
-    balance: (a.grp === 'credit' || a.grp === 'loan') ? String(Math.abs(a.starting_balance)) : String(a.starting_balance),
-    goal: a.goal_amount ? String(a.goal_amount) : '', kind: a.grp, iban: a.iban || '',
+    balance: (a.grp === 'credit' || a.grp === 'loan') ? numStr(Math.abs(a.starting_balance)) : numStr(a.starting_balance),
+    goal: a.goal_amount ? numStr(a.goal_amount) : '', kind: a.grp, iban: a.iban || '',
     autopayEnabled: !!(a.autopay && a.autopay.enabled),
     autopayFrom: a.autopay && a.autopay.from_account_id ? a.autopay.from_account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || ''),
     autopayDay: a.autopay ? String(a.autopay.day_of_month) : '1',
     autopayWeekendRule: a.autopay ? a.autopay.weekend_rule : 'none',
     loanFrom: a.loan && a.loan.from_account_id ? a.loan.from_account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || ''),
-    loanRate: a.loan ? String(((a.loan.annual_rate || 0) * 100)) : '',
+    loanRate: a.loan ? numStr((a.loan.annual_rate || 0) * 100) : '',
     loanTermMonths: a.loan ? String(a.loan.term_months_remaining) : '',
     loanCategory: a.loan && a.loan.category_id ? a.loan.category_id : ((s.cats.find(c => c.name === 'Loan Interest') || s.cats.find(c => c.kind === 'expense') || {}).id || ''),
     loanDay: a.loan ? String(a.loan.day_of_month) : '1',
@@ -183,7 +220,8 @@ export function computeView() {
     const rule = s.recurring.find(r => r.to_account_id === a.id && r.amount_mode === 'amortized');
     openModal('extraPayment', a.id, {
       extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10),
-      extraPaymentRuleId: rule ? rule.id : ''
+      extraPaymentRuleId: rule ? rule.id : '',
+      extraPaymentFrom: rule ? rule.account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || '')
     });
   };
   const accountGroups = [
@@ -220,11 +258,13 @@ export function computeView() {
             ? (a.loan.paid_off ? 'Paid off' : 'Next payment ' + (a.loan.next_date ? dm(new Date(a.loan.next_date + 'T00:00:00')) : '—') + ' · ' + a.loan.term_months_remaining + ' left')
             : 'No schedule set'),
           isLoan,
+          includedInNetWorth: !!a.include_in_net_worth,
           meta: own.length ? own.length + ' mov.' : 'new',
           onClick: () => { s.page = 'balance'; s.balanceTab = 'movements'; s.fAccounts = [a.id]; s.filtersOpen = true; render(); },
           onEdit: () => editAccount(a),
           onDelete: () => openModal('deleteAccount', a.id),
-          onExtraPayment: () => addExtraPayment(a)
+          onExtraPayment: () => addExtraPayment(a),
+          onToggleNetWorth: () => toggleNetWorthAction(a)
         };
       })
     };
@@ -357,7 +397,7 @@ export function computeView() {
   const rawPeak = Math.max(1, ...buckets.map(b => b.total));
   const step = Math.pow(10, Math.floor(Math.log10(rawPeak)));
   const peak = Math.ceil(rawPeak / (step / 2)) * (step / 2);
-  const axis = [4, 3, 2, 1, 0].map(i => Math.round(peak * i / 4).toLocaleString('de-DE'));
+  const axis = [4, 3, 2, 1, 0].map(i => Math.round(peak * i / 4).toLocaleString(locale()));
   const bars = buckets.map(b => ({
     label: b.label, height: Math.max(0.5, b.total / peak * 100) + '%', tip: b.full + ' · ' + money(b.total),
     segments: Object.keys(b.byCat).sort((x, y) => b.byCat[y] - b.byCat[x]).map(id => {
@@ -375,7 +415,7 @@ export function computeView() {
       name: c.name, color: c.color, icon: '#' + c.icon, spent: money(sp), limit: money(lim),
       pct: Math.round(pct) + '%', width: Math.min(100, pct) + '%', barColor: col,
       left: pct > 100 ? money(sp - lim) + ' over' : money(lim - sp) + ' left',
-      onClick: () => openModal('budget', id, { category: id, limit: String(s.budgets[id]) })
+      onClick: () => openModal('budget', id, { category: id, limit: numStr(s.budgets[id]) })
     };
   }).sort((a, b) => parseFloat(b.pct) - parseFloat(a.pct));
   const gLim = bIds.reduce((a, id) => a + s.budgets[id] * M, 0);
@@ -401,6 +441,65 @@ export function computeView() {
     path: nwPath, area: nwPath + ` L100,${nwH} L0,${nwH} Z`,
     labels: nwPoints.map(p => p.label)
   };
+  // ---- loan payoff projection (pure client-side estimate for the Overview
+  // widget — same amortization formula as backend/recurring.py's
+  // _amortized_payment, ported to JS; this is a forward-looking display,
+  // not authoritative ledger data, so it doesn't need to match
+  // generate_due()'s actual future rounding to the cent) ----
+  const amortizedPaymentJs = (principal, monthlyRate, n) => {
+    if (n <= 0) return principal;
+    if (monthlyRate === 0) return principal / n;
+    const factor = Math.pow(1 + monthlyRate, n);
+    return principal * monthlyRate * factor / (factor - 1);
+  };
+  const activeLoans = s.accounts.filter(a =>
+    a.grp === 'loan' && a.active && a.loan && !a.loan.paid_off && a.loan.annual_rate != null && a.loan.term_months_remaining > 0
+  );
+  let loanPayoffTrend = null;
+  if (activeLoans.length) {
+    const maxMonths = Math.max(...activeLoans.map(a => a.loan.term_months_remaining));
+    const perLoanSeries = activeLoans.map(a => {
+      let balance = Math.max(0, -a.balance), remaining = a.loan.term_months_remaining;
+      const monthlyRate = (a.loan.annual_rate || 0) / 12;
+      const series = [balance];
+      for (let m = 1; m <= maxMonths; m++) {
+        if (remaining > 0 && balance > 0.005) {
+          const payment = amortizedPaymentJs(balance, monthlyRate, remaining);
+          const interest = balance * monthlyRate;
+          const principalPortion = Math.min(balance, payment - interest);
+          balance = Math.max(0, balance - principalPortion);
+          remaining--;
+        }
+        series.push(balance);
+      }
+      return series;
+    });
+    const combined = Array.from({ length: maxMonths + 1 }, (_, m) => perLoanSeries.reduce((sum, series) => sum + series[m], 0));
+    let payoffIdx = combined.findIndex(v => v <= 0.5);
+    if (payoffIdx === -1) payoffIdx = combined.length - 1;
+    const today = new Date();
+    const payoffDate = new Date(today.getFullYear(), today.getMonth() + payoffIdx, 1);
+    const lpMax = Math.max(...combined, 1);
+    const lpPad = 4, lpH = 34, lpInner = lpH - lpPad * 2;
+    const lpCoords = combined.map((v, i) => ({
+      x: combined.length > 1 ? i / (combined.length - 1) * 100 : 50,
+      y: lpPad + lpInner - (v / lpMax) * lpInner
+    }));
+    const lpPath = lpCoords.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(2) + ',' + p.y.toFixed(2)).join(' ');
+    const labelCount = Math.min(6, maxMonths + 1);
+    const lpLabels = Array.from({ length: labelCount }, (_, k) => {
+      const idx = Math.round(k / Math.max(1, labelCount - 1) * maxMonths);
+      const d = new Date(today.getFullYear(), today.getMonth() + idx, 1);
+      return M3[d.getMonth()] + ' ’' + String(d.getFullYear()).slice(2);
+    });
+    loanPayoffTrend = {
+      current: money(combined[0]),
+      payoffLabel: MONTHS[payoffDate.getMonth()] + ' ' + payoffDate.getFullYear(),
+      path: lpPath, area: lpPath + ` L100,${lpH} L0,${lpH} Z`,
+      labels: lpLabels
+    };
+  }
+
   const dashboardAccounts = accountGroups.flatMap(g => g.items);
   const budgetWatch = budgetRows.slice(0, 3).map(b => Object.assign({}, b, { onClick: () => { s.page = 'budget'; render(); } }));
 
@@ -490,7 +589,8 @@ export function computeView() {
     dayGroups, noRows: rows.length === 0,
     movementSummary: rows.length + ' movements · net ' + money(rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0), true),
     axis, bars, barGap: bars.length > 20 ? '2px' : bars.length > 10 ? '5px' : '12px',
-    netWorthTrend, dashboardAccounts, budgetWatch, topExpenseCats, topIncomeCats, insight, recentTx,
+    netWorthTrend, hasLoanPayoff: !!loanPayoffTrend, loanPayoffTrend: loanPayoffTrend || {},
+    dashboardAccounts, budgetWatch, topExpenseCats, topIncomeCats, insight, recentTx,
     globalBg: gOver ? '#fdecea' : TH.surface, globalTrack: gOver ? '#f6cfcb' : TH.border,
     globalColor: gOver ? RED : ACCENT, globalPct: Math.round(gPct) + '%',
     globalWidth: Math.min(100, gPct) + '%', globalSpent: money(gSp), globalLimit: money(gLim),
@@ -521,6 +621,8 @@ export function computeView() {
     extraPaymentAccountName: extraPaymentTarget ? extraPaymentTarget.name : '',
     extraPaymentOwed: extraPaymentTarget ? money(Math.max(0, -extraPaymentTarget.balance)) : '',
     formExtraPaymentAmount: s.form.extraPaymentAmount, formExtraPaymentDate: s.form.extraPaymentDate,
+    formExtraPaymentFrom: s.form.extraPaymentFrom,
+    extraPaymentFromOptions: s.accounts.filter(a => (a.grp === 'spend' || a.grp === 'save') && a.active).map(a => ({ v: a.id, l: a.name })),
     modalTitle: modalMeta[0], modalCta: modalMeta[1],
     movementTabs: [['Expense', 'Expenses'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
       const on = s.form.movement === t[0];

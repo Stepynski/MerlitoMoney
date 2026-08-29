@@ -4,12 +4,13 @@ CREATE TABLE IF NOT EXISTS accounts (
     type TEXT NOT NULL,
     icon TEXT NOT NULL,
     color TEXT NOT NULL,
-    grp TEXT NOT NULL CHECK (grp IN ('spend', 'save', 'credit')),
+    grp TEXT NOT NULL CHECK (grp IN ('spend', 'save', 'credit', 'loan')),
     starting_balance REAL NOT NULL DEFAULT 0,
     goal_amount REAL,
     iban TEXT,
     bank_connection_id TEXT,
-    active INTEGER NOT NULL DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1,
+    include_in_net_worth INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS categories (
@@ -28,7 +29,8 @@ CREATE TABLE IF NOT EXISTS recurring_rules (
     to_account_id INTEGER REFERENCES accounts(id),
     category_id INTEGER REFERENCES categories(id),
     amount REAL,
-    amount_mode TEXT NOT NULL DEFAULT 'fixed' CHECK (amount_mode IN ('fixed', 'full_balance')),
+    amount_mode TEXT NOT NULL DEFAULT 'fixed' CHECK (amount_mode IN ('fixed', 'full_balance', 'amortized')),
+    annual_rate REAL,
     note TEXT,
     freq TEXT NOT NULL CHECK (freq IN ('daily', 'weekly', 'monthly', 'yearly', 'monthly_nth_business_day')),
     interval_n INTEGER NOT NULL DEFAULT 1,

@@ -51,6 +51,14 @@ export function themeSettingsHtml() {
           </button>`;
         }).join('')}
       </div>
+      <div style="height:1px;background:${TH.border};margin:2px 0"></div>
+      <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em">Number format</span>
+      <div style="display:flex;gap:8px">
+        ${[['comma', '1.234,56'], ['point', '1,234.56']].map(([f, example]) => {
+          const on = state.numberFormat === f;
+          return `<button data-click="${H(() => { state.numberFormat = f; saveThemePref('mm_number_format', f); render(); })}" style="flex:1;border:1.5px solid ${on ? ACCENT : TH.border};background:${on ? TH.accentSoft : 'transparent'};color:${on ? ACCENT : TH.text};border-radius:10px;padding:9px;cursor:pointer;font-weight:600;font-size:13.5px;font-variant-numeric:tabular-nums">${example}</button>`;
+        }).join('')}
+      </div>
     </div>`;
 }
 
@@ -198,6 +206,7 @@ export function renderApp() {
                 <span style="font-size:12px;color:${TH.textFaint};text-align:right;flex:none">${a.meta}</span>
               </button>
               ${a.isLoan ? `<button data-click="${H(a.onExtraPayment)}" aria-label="Add extra payment on ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-piggy"></use></svg></button>` : ''}
+              <button data-click="${H(a.onToggleNetWorth)}" aria-label="${a.includedInNetWorth ? 'Exclude' : 'Include'} ${esc(a.name)} from net worth" title="${a.includedInNetWorth ? 'Counted in net worth — click to exclude' : 'Excluded from net worth — click to include'}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${a.includedInNetWorth ? GREY : TH.textFaint};flex:none"><svg width="16" height="16"><use href="#${a.includedInNetWorth ? 'ic-eye' : 'ic-eye-off'}"></use></svg></button>
               <button data-click="${H(a.onEdit)}" aria-label="Edit ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-edit"></use></svg></button>
               <button data-click="${H(a.onDelete)}" aria-label="Delete ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-trash"></use></svg></button>
             </div>`).join('')}
@@ -368,7 +377,10 @@ export function renderApp() {
       <div class="mm-dash-hero">
         <section style="background:${TH.surface};border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:8px">
           <div style="display:flex;justify-content:space-between;align-items:baseline">
-            <span style="font-weight:700;font-size:15px">Net worth</span>
+            <span style="display:flex;align-items:baseline;gap:6px">
+              <span style="font-weight:700;font-size:15px">Net worth</span>
+              <span style="font-size:11px;color:${TH.textFaint}">Last 6 months</span>
+            </span>
             <span style="font-weight:600;color:${V.netWorthTrend.changeColor};font-size:13px">${V.netWorthTrend.changeLabel}</span>
           </div>
           <span style="font-size:25px;font-weight:700;font-variant-numeric:tabular-nums">${V.netWorthTrend.current}</span>
@@ -395,6 +407,23 @@ export function renderApp() {
           </div>
         </div>
       </div>
+
+      ${V.hasLoanPayoff ? `
+      <section style="background:${TH.surface};border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font-weight:700;font-size:15px">Loan payoff projection</span>
+          <span style="font-size:12px;color:${GREY}">Estimated payoff: ${V.loanPayoffTrend.payoffLabel}</span>
+        </div>
+        <span style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums">${V.loanPayoffTrend.current} owed today</span>
+        <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:70px;display:block">
+          <path d="${V.loanPayoffTrend.area}" fill="#e8890c22" stroke="none"></path>
+          <path d="${V.loanPayoffTrend.path}" fill="none" stroke="#e8890c" stroke-width="1.6" vector-effect="non-scaling-stroke"></path>
+        </svg>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:${TH.textFaint}">
+          ${V.loanPayoffTrend.labels.map(l => `<span>${l}</span>`).join('')}
+        </div>
+        <span style="font-size:11px;color:${TH.textFaint}">Projected from today's rate and term — assumes no further prepayments and no rate changes.</span>
+      </section>` : ''}
 
       <section style="background:${TH.surface};border-radius:16px;padding:16px 16px 12px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
         <div style="display:grid;grid-template-columns:46px 1fr;gap:6px">
@@ -615,6 +644,11 @@ export function renderApp() {
               <p style="margin:0;font-size:14px;color:${GREY};line-height:1.5">
                 Extra principal payment on <strong style="color:${TH.text}">${esc(V.extraPaymentAccountName)}</strong> (currently owed: <strong style="color:${TH.text}">${V.extraPaymentOwed}</strong>). This reduces the debt immediately, and the next scheduled payment is recalculated for the remaining term automatically.
               </p>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Pay from
+                <select data-change="${H(e => { set('extraPaymentFrom', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                  ${V.extraPaymentFromOptions.map(o => `<option value="${o.v}" ${o.v === V.formExtraPaymentFrom ? 'selected' : ''}>${o.l}</option>`).join('')}
+                </select>
+              </label>
               <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Amount
                 <input id="f-extra-payment-amount" value="${esc(V.formExtraPaymentAmount)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
               </label>

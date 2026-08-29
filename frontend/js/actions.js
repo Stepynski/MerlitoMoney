@@ -73,13 +73,17 @@ export async function submitModal(f) {
       });
     }
   } else if (state.modal === 'extraPayment') {
-    const rule = state.recurring.find(r => String(r.id) === String(f.extraPaymentRuleId));
-    if (!rule) throw new Error("Set up this loan's payment schedule first");
+    // Just a normal Transfer internal to the loan account (state.editId) —
+    // identical in every way to creating one via the regular "New movement"
+    // flow, so it doesn't depend on a recurring rule existing at all (that
+    // was an unnecessary indirection that could fail even though the
+    // payment itself needs nothing but the two account ids and an amount).
+    if (!f.extraPaymentFrom) throw new Error('Choose which account to pay from');
     if (!num(f.extraPaymentAmount)) throw new Error('Enter an amount');
     await api('/api/transactions', {
       method: 'POST',
       body: JSON.stringify({
-        date: f.extraPaymentDate, account_id: rule.account_id, to_account_id: rule.to_account_id,
+        date: f.extraPaymentDate, account_id: f.extraPaymentFrom, to_account_id: state.editId,
         type: 'Transfer internal', amount: num(f.extraPaymentAmount), note: 'Extra loan payment'
       })
     });
@@ -162,6 +166,11 @@ export async function deleteAccountAction() {
 }
 export async function reopenAccount(id) {
   await api('/api/accounts/' + id, { method: 'PATCH', body: JSON.stringify({ active: true }) });
+  await loadAll();
+  render();
+}
+export async function toggleNetWorthAction(a) {
+  await api('/api/accounts/' + a.id, { method: 'PATCH', body: JSON.stringify({ include_in_net_worth: !a.include_in_net_worth }) });
   await loadAll();
   render();
 }

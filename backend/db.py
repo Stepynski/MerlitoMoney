@@ -20,6 +20,7 @@ def _migrate(conn):
         "ALTER TABLE accounts ADD COLUMN iban TEXT",
         "ALTER TABLE accounts ADD COLUMN bank_connection_id TEXT",
         "ALTER TABLE accounts ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE accounts ADD COLUMN include_in_net_worth INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE transactions ADD COLUMN recurring_id INTEGER REFERENCES recurring_rules(id)",
     ):
         try:
@@ -59,12 +60,13 @@ def _rebuild_accounts_grp_check(conn):
             goal_amount REAL,
             iban TEXT,
             bank_connection_id TEXT,
-            active INTEGER NOT NULL DEFAULT 1
+            active INTEGER NOT NULL DEFAULT 1,
+            include_in_net_worth INTEGER NOT NULL DEFAULT 1
         )
     """)
     conn.execute("""
-        INSERT INTO accounts_new (id, name, type, icon, color, grp, starting_balance, goal_amount, iban, bank_connection_id, active)
-        SELECT id, name, type, icon, color, grp, starting_balance, goal_amount, iban, bank_connection_id, active FROM accounts
+        INSERT INTO accounts_new (id, name, type, icon, color, grp, starting_balance, goal_amount, iban, bank_connection_id, active, include_in_net_worth)
+        SELECT id, name, type, icon, color, grp, starting_balance, goal_amount, iban, bank_connection_id, active, include_in_net_worth FROM accounts
     """)
     conn.execute("DROP TABLE accounts")
     conn.execute("ALTER TABLE accounts_new RENAME TO accounts")
