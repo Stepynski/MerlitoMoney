@@ -1,8 +1,0 @@
-{
-	default_sni 192.168.2.25
-}
-
-192.168.2.25:8444 {
-	tls /certs/importer.crt /certs/importer.key
-	reverse_proxy importer:8080
-}

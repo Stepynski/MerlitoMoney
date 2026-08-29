@@ -1,91 +1,11 @@
 services:
-  db:
-    image: mariadb:lts
-    container_name: merlitomoney_db
-    restart: unless-stopped
-    environment:
-      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
-      MYSQL_DATABASE: ${DB_DATABASE}
-      MYSQL_USER: ${DB_USERNAME}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - db_data:/var/lib/mysql
-    networks:
-      - merlitomoney
-
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: merlitomoney_app
-    restart: unless-stopped
-    env_file: .env
-    volumes:
-      - upload_data:/var/www/html/storage/upload
-      - ./secrets:/secrets:ro
-      - ./import-configs:/import-configs:ro
-    ports:
-      - "8080:80"
-    depends_on:
-      - db
-    networks:
-      - merlitomoney
-
-  importer:
-    image: fireflyiii/data-importer:latest
-    container_name: merlitomoney_importer
-    restart: unless-stopped
-    env_file: .importer.env
-    volumes:
-      - ./secrets:/secrets:ro
-      - ./import-configs:/import:ro
-    depends_on:
-      - app
-    networks:
-      - merlitomoney
-
-  caddy:
-    image: caddy:2-alpine
-    container_name: merlitomoney_caddy
+    build: .
+    container_name: merlitomoney-v2
     restart: unless-stopped
     ports:
-      - "8444:8444"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./certs:/certs:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - importer
-    networks:
-      - merlitomoney
-
-  cron:
-    image: alpine
-    container_name: merlitomoney_cron
-    restart: unless-stopped
+      - "8081:8081"
     environment:
-      TZ: Europe/Amsterdam
-    env_file:
-      - .env
-      - .importer.env
-    command: ["sh", "-c", "apk add --no-cache tzdata curl && \
-      { echo \"0 3 * * * curl -fsS http://app:80/api/v1/cron/$$STATIC_CRON_TOKEN > /dev/null\"; \
-        echo \"0 6,18 * * * curl -fsS -X POST http://importer:8080/autoimport -d secret=$$AUTO_IMPORT_SECRET -d directory=/import > /dev/null\"; \
-      } | crontab - && \
-      crond -f -L /dev/stdout"]
-    depends_on:
-      - app
-      - importer
-    networks:
-      - merlitomoney
-
-volumes:
-  db_data:
-  upload_data:
-  caddy_data:
-  caddy_config:
-
-networks:
-  merlitomoney:
-    driver: bridge
+      MERLITOMONEY_PASSWORD: ${MERLITOMONEY_PASSWORD}
+    volumes:
+      - ./data:/app/data
