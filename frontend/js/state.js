@@ -11,6 +11,8 @@ export const state = {
   authed: false, loginError: '',
   accounts: [], cats: [], tx: [], budgets: {}, recurring: [],
   staged: [], feeds: [], connections: [], importBusy: false, importMsg: '',
+  bank: { configured: false, connections: [], redirect_url: '' },
+  aspsps: [], aspspCountry: 'NL', aspspLoading: false, syncDays: '30',
   mode: 'month', anchor: new Date(), view: 'expenses', balanceTab: 'movements',
   fAccounts: [], fTypes: [], fCats: [], filtersOpen: false,
   narrow: window.matchMedia('(max-width: 859px)').matches,

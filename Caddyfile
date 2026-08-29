@@ -1,0 +1,22 @@
+# TLS in front of MerlitoMoney, purely so the bank has an https:// address to
+# send the browser back to after authorisation — Enable Banking refuses a
+# plain-http redirect URL, and uvicorn serves plain http.
+#
+# Two things here are deliberate, both learned the hard way:
+#
+#   - The certificate is a static self-signed pair from ./certs, not Caddy's
+#     automatic "tls internal" issuer. Connecting by literal IP address sends
+#     no SNI (RFC 6066), so the automatic per-hostname lookup matches the
+#     container's own internal address instead of the LAN address actually
+#     dialled, and the handshake fails outright.
+#
+#   - default_sni gives connections that arrive without SNI a certificate to
+#     be served by default, rather than none at all.
+{
+	default_sni 192.168.2.25
+}
+
+192.168.2.25:8444 {
+	tls /certs/importer.crt /certs/importer.key
+	reverse_proxy app:8081
+}

@@ -4,7 +4,8 @@ import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS, APP_VERSION } from './constan
 import { render } from './render.js';
 import {
   reopenAccount, toggleNetWorthAction, openAboutModal,
-  decideStaged, setStagedField, mapFeedAction, toggleFeedSyncAction
+  decideStaged, setStagedField, mapFeedAction, toggleFeedSyncAction,
+  connectBankAction, loadAspsps
 } from './actions.js';
 
 // ---------- helpers ported from the design ----------
@@ -658,7 +659,8 @@ export function computeView() {
     extraPayment: ['Add extra payment', 'Add'],
     data: ['Data', ''],
     backups: ['Backups', ''],
-    about: ['About', '']
+    about: ['About', ''],
+    connectBank: ['Connect a bank', '']
   }[s.modal] || ['', ''];
   // ---------- bank import review ----------
   const importAccountOptions = [{ v: '', l: 'Not linked' }]
@@ -718,6 +720,18 @@ export function computeView() {
     };
   });
 
+  const bankConnections = (s.bank.connections || []).filter(c => c.status === 'active').map(c => {
+    const until = c.valid_until ? new Date(c.valid_until) : null;
+    const daysLeft = until ? Math.ceil((until - new Date()) / 86400000) : null;
+    return {
+      name: c.aspsp_name, country: c.aspsp_country,
+      // A consent lapses after about 90 days and the bank then refuses to
+      // answer, so the countdown is shown before it bites rather than after.
+      expiry: daysLeft === null ? '' : daysLeft > 0 ? `access expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : 'access has expired — reconnect',
+      expiring: daysLeft !== null && daysLeft <= 7
+    };
+  });
+
   const stagedPending = s.staged.filter(r => r.decision === 'pending').length;
   const stagedReady = s.staged.filter(r => r.decision !== 'pending').length;
   const stagedFlagged = s.staged.filter(r => r.decision === 'pending' && r.match_tx_id).length;
@@ -747,6 +761,17 @@ export function computeView() {
     importRows, importFeeds, noStaged: importRows.length === 0, noFeeds: importFeeds.length === 0,
     stagedPending, stagedReady, stagedFlagged,
     importBusy: s.importBusy, importMsg: s.importMsg,
+    bankConfigured: !!s.bank.configured, bankConnections, syncDays: s.syncDays,
+    syncDayOptions: [['1', 'Last 24 hours'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']],
+    isConnectBankModal: s.modal === 'connectBank',
+    aspspLoading: s.aspspLoading,
+    aspspCountry: s.aspspCountry,
+    aspspCountryOptions: [['NL', 'Netherlands'], ['IT', 'Italy'], ['DE', 'Germany'], ['BE', 'Belgium'], ['FR', 'France'], ['ES', 'Spain']],
+    onAspspCountry: e => { s.aspspCountry = e.target.value; loadAspsps(); },
+    aspspList: s.aspsps.map(b => ({
+      name: b.name, country: b.country,
+      onClick: () => connectBankAction(b.name, b.country)
+    })),
     showRecurringTab: s.page === 'balance' && s.balanceTab === 'recurring',
     balanceTabs: [['movements', 'Movements'], ['recurring', 'Recurring']].map(t => {
       const on = s.balanceTab === t[0];

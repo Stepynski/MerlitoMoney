@@ -7,5 +7,27 @@ services:
       - "8081:8081"
     environment:
       MERLITOMONEY_PASSWORD: ${MERLITOMONEY_PASSWORD}
+      # Bank import (Enable Banking). Leave unset to run without it: the
+      # review queue still works, there is simply nothing to fetch into it.
+      ENABLEBANKING_APP_ID: ${ENABLEBANKING_APP_ID:-}
+      ENABLEBANKING_KEY_FILE: /app/secrets/enable-banking-private-key.pem
+      # Must match, character for character, a redirect URL registered on the
+      # Enable Banking application — it is served by the caddy service below.
+      ENABLEBANKING_REDIRECT_URL: ${ENABLEBANKING_REDIRECT_URL:-https://192.168.2.25:8444/api/bank/callback}
     volumes:
       - ./data:/app/data
+      - ./secrets:/app/secrets:ro
+
+  # Terminates TLS for the bank's redirect back. Only needed for bank import;
+  # the app itself stays reachable over plain http on 8081.
+  caddy:
+    image: caddy:2
+    container_name: merlitomoney-caddy
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "8444:8444"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro

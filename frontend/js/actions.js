@@ -299,6 +299,64 @@ export function decideStaged(id, decision) {
   return setStagedField(id, { decision: next });
 }
 
+export async function syncBankAction() {
+  state.importBusy = true; state.importMsg = 'Asking your bank…'; render();
+  try {
+    const res = await api('/api/bank/sync', {
+      method: 'POST', body: JSON.stringify({ days: parseInt(state.syncDays, 10) || 30 })
+    });
+    const bits = [`${res.added} new to review`];
+    if (res.already_known) bits.push(`${res.already_known} already handled`);
+    if (res.pending) bits.push(`${res.pending} still pending at the bank`);
+    if (res.wrong_currency) bits.push(`${res.wrong_currency} in another currency, skipped`);
+    if (res.unmapped) bits.push(`${res.unmapped} from unlinked accounts`);
+    state.importMsg = bits.join(' · ');
+    // The bank's own figure against ours: a feed that omits some movements
+    // makes an account drift silently, and this is where that shows up.
+    (res.balances || []).forEach(b => {
+      if (Math.abs(b.bank - b.app) > 0.01) {
+        state.importMsg += `\n${b.feed}: bank says ${b.bank}, we have ${b.app}`;
+      }
+    });
+    (res.errors || []).forEach(e => { state.importMsg += `\n${e.feed}: ${e.error}`; });
+  } catch (e) {
+    try { state.importMsg = JSON.parse(e.message).detail; } catch (_) { state.importMsg = 'Sync failed'; }
+  }
+  state.importBusy = false;
+  await loadAll();
+  render();
+}
+
+export async function loadAspsps() {
+  state.aspspLoading = true; render();
+  try {
+    state.aspsps = await api('/api/bank/aspsps?country=' + encodeURIComponent(state.aspspCountry));
+  } catch (e) {
+    state.aspsps = [];
+    try { state.formError = JSON.parse(e.message).detail; } catch (_) { state.formError = 'Could not list banks'; }
+  }
+  state.aspspLoading = false;
+  render();
+}
+
+export function openConnectBank() {
+  state.aspsps = []; state.formError = '';
+  openModal('connectBank');
+  loadAspsps();
+}
+
+export async function connectBankAction(name, country) {
+  try {
+    const res = await api('/api/bank/connect', { method: 'POST', body: JSON.stringify({ aspsp_name: name, country }) });
+    // Hand the browser to the bank's own login. Everything from here happens
+    // on the bank's site until it redirects back to /api/bank/callback.
+    window.location.href = res.url;
+  } catch (e) {
+    try { state.formError = JSON.parse(e.message).detail; } catch (_) { state.formError = 'Could not start the connection'; }
+    render();
+  }
+}
+
 export async function commitImportAction() {
   state.importBusy = true; state.importMsg = ''; render();
   try {

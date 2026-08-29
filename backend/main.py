@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from auth import check_password, ensure_password_seeded, hash_password
+import enablebanking
 from bankimport import StaleLinkError, commit_staged, refresh_matches, stage_rows
 from db import ensure_default_categories, get_conn, init_db, rows_to_dicts
 from iban import is_valid_iban, normalize_iban
@@ -990,6 +991,174 @@ def cancel_import(request: Request):
     with get_conn() as conn:
         cur = conn.execute("DELETE FROM import_staging")
     return {"discarded": cur.rowcount}
+
+
+# ---------- bank connection (Enable Banking) ----------
+
+@app.get("/api/bank/status")
+def bank_status(request: Request):
+    require_auth(request)
+    with get_conn() as conn:
+        connections = rows_to_dicts(
+            conn.execute("SELECT * FROM bank_connections ORDER BY id DESC").fetchall()
+        )
+    return {"configured": enablebanking.is_configured(), "redirect_url": enablebanking.redirect_url(),
+            "connections": connections}
+
+
+@app.get("/api/bank/aspsps")
+def bank_aspsps(request: Request, country: Optional[str] = None):
+    require_auth(request)
+    try:
+        return enablebanking.list_aspsps(country)
+    except (enablebanking.BankConfigError, enablebanking.BankApiError) as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+class BankConnectIn(BaseModel):
+    aspsp_name: str
+    country: str
+
+
+@app.post("/api/bank/connect")
+def bank_connect(body: BankConnectIn, request: Request):
+    require_auth(request)
+    state = enablebanking.new_state()
+    try:
+        auth = enablebanking.start_authorization(body.aspsp_name, body.country, state)
+    except (enablebanking.BankConfigError, enablebanking.BankApiError) as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    with get_conn() as conn:
+        # Only one authorisation can be in flight — the session holds a single
+        # state — so any earlier pending row is an attempt that was abandoned
+        # partway through, and would otherwise pile up forever.
+        conn.execute("DELETE FROM bank_connections WHERE status = 'pending'")
+        conn.execute(
+            "INSERT INTO bank_connections (aspsp_name, aspsp_country, auth_id, valid_until, created_at, status) "
+            "VALUES (?, ?, ?, ?, ?, 'pending')",
+            (body.aspsp_name, body.country, auth["authorization_id"], auth["valid_until"],
+             datetime.utcnow().isoformat()),
+        )
+    # The state is held in the session rather than the database: it exists only
+    # to prove the browser coming back is the one that left.
+    request.session["bank_state"] = state
+    return {"url": auth["url"]}
+
+
+@app.get("/api/bank/callback")
+def bank_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None,
+                  error: Optional[str] = None):
+    """Where the bank sends the browser back after authorisation."""
+    require_auth(request)
+    expected = request.session.pop("bank_state", None)
+    if error:
+        return RedirectResponse("/?bank_error=" + error, status_code=303)
+    if not code or not state or state != expected:
+        return RedirectResponse("/?bank_error=state_mismatch", status_code=303)
+    try:
+        session = enablebanking.create_session(code)
+    except (enablebanking.BankConfigError, enablebanking.BankApiError) as e:
+        return RedirectResponse("/?bank_error=" + str(e)[:120], status_code=303)
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM bank_connections WHERE status = 'pending' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        connection_id = row["id"] if row else None
+        if connection_id:
+            conn.execute(
+                "UPDATE bank_connections SET session_id = ?, valid_until = COALESCE(?, valid_until), "
+                "status = 'active' WHERE id = ?",
+                (session["session_id"], session.get("valid_until"), connection_id),
+            )
+        # Renewing a consent hands back brand new identifiers for the same real
+        # accounts. Matching on IBAN carries the previous mapping across, so the
+        # user does not have to redo it — and the old identifiers are kept, not
+        # deleted, because transactions already imported still refer to them.
+        for acc in session["accounts"]:
+            inherited = None
+            if acc.get("iban"):
+                prev = conn.execute(
+                    "SELECT account_id FROM bank_feeds WHERE iban = ? AND account_id IS NOT NULL "
+                    "AND uuid != ? ORDER BY rowid DESC LIMIT 1",
+                    (acc["iban"], acc["uid"]),
+                ).fetchone()
+                if prev:
+                    inherited = prev["account_id"]
+                    conn.execute(
+                        "UPDATE bank_feeds SET retired = 1 WHERE iban = ? AND uuid != ?",
+                        (acc["iban"], acc["uid"]),
+                    )
+            conn.execute(
+                "INSERT INTO bank_feeds (uuid, connection_id, account_id, iban, name, currency) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(uuid) DO UPDATE SET connection_id = excluded.connection_id, "
+                "iban = COALESCE(excluded.iban, iban), name = COALESCE(excluded.name, name), "
+                "currency = COALESCE(excluded.currency, currency), retired = 0",
+                (acc["uid"], connection_id, inherited, acc.get("iban"), acc.get("name"), acc.get("currency")),
+            )
+    return RedirectResponse("/?bank_connected=1", status_code=303)
+
+
+class BankSyncIn(BaseModel):
+    days: int = 30
+    feed_uuids: Optional[list] = None
+
+
+@app.post("/api/bank/sync")
+def bank_sync(body: BankSyncIn, request: Request):
+    """Fetch recent transactions into the review queue. Never runs on its own."""
+    require_auth(request)
+    date_from, date_to = enablebanking.window(body.days)
+    with get_conn() as conn:
+        query = "SELECT * FROM bank_feeds WHERE account_id IS NOT NULL AND sync_enabled = 1 AND retired = 0"
+        feeds = rows_to_dicts(conn.execute(query).fetchall())
+    if body.feed_uuids:
+        feeds = [f for f in feeds if f["uuid"] in body.feed_uuids]
+    if not feeds:
+        raise HTTPException(status_code=400, detail="No bank accounts are set up to sync")
+
+    rows, balances, errors = [], {}, []
+    for feed in feeds:
+        try:
+            for tx in enablebanking.fetch_transactions(feed["uuid"], date_from, date_to):
+                rows.append(enablebanking.normalize(tx, feed["uuid"]))
+            balances[feed["uuid"]] = enablebanking.fetch_balance(feed["uuid"])
+        except (enablebanking.BankConfigError, enablebanking.BankApiError) as e:
+            # One bank being unreachable must not throw away what the others
+            # returned; the queue is additive and the failure is reported.
+            errors.append({"feed": feed["name"] or feed["uuid"], "error": str(e)})
+
+    with get_conn() as conn:
+        result = stage_rows(conn, rows)
+        for uuid_, bal in balances.items():
+            conn.execute("UPDATE bank_feeds SET last_synced_at = ? WHERE uuid = ?",
+                         (datetime.utcnow().isoformat(), uuid_))
+        # A bank's own figure next to ours catches the silent drift that
+        # happens when a feed omits some movements entirely.
+        drift = []
+        for feed in feeds:
+            reported = balances.get(feed["uuid"])
+            if reported is None:
+                continue
+            row = conn.execute("SELECT starting_balance FROM accounts WHERE id = ?", (feed["account_id"],)).fetchone()
+            if not row:
+                continue
+            delta = conn.execute(
+                "SELECT COALESCE(SUM(CASE WHEN type = 'Income' THEN amount "
+                "WHEN type IN ('Expense', 'Transfer external') THEN -amount ELSE 0 END), 0) "
+                "+ COALESCE((SELECT SUM(amount) FROM transactions WHERE to_account_id = ? AND type = 'Transfer internal'), 0) "
+                "- COALESCE((SELECT SUM(amount) FROM transactions WHERE account_id = ? AND type = 'Transfer internal'), 0) "
+                "FROM transactions WHERE account_id = ?",
+                (feed["account_id"], feed["account_id"], feed["account_id"]),
+            ).fetchone()[0]
+            ours = row["starting_balance"] + (delta or 0)
+            drift.append({"feed": feed["name"] or feed["uuid"], "bank": reported, "app": round(ours, 2)})
+
+    result["errors"] = errors
+    result["balances"] = drift
+    result["window"] = {"from": date_from, "to": date_to}
+    return result
 
 
 # ---------- static frontend (mounted last so /api/* takes priority) ----------

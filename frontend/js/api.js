@@ -9,12 +9,12 @@ export async function api(path, opts) {
 }
 
 export async function loadAll() {
-  const [accounts, cats, budgetRows, tx, recurring, staged, feeds] = await Promise.all([
+  const [accounts, cats, budgetRows, tx, recurring, staged, feeds, bank] = await Promise.all([
     api('/api/accounts'), api('/api/categories'), api('/api/budgets'), api('/api/transactions'), api('/api/recurring'),
     // Reloading the queue alongside everything else is what keeps its
     // duplicate suggestions honest: entering a movement by hand re-runs the
     // match against what the ledger now holds.
-    api('/api/import/staged'), api('/api/import/feeds')
+    api('/api/import/staged'), api('/api/import/feeds'), api('/api/bank/status')
   ]);
   state.accounts = accounts;
   state.cats = cats;
@@ -28,5 +28,7 @@ export async function loadAll() {
   state.staged = Array.isArray(staged) ? staged : [];
   state.feeds = feeds && Array.isArray(feeds.feeds) ? feeds.feeds : [];
   state.connections = feeds && Array.isArray(feeds.connections) ? feeds.connections : [];
+  state.bank = bank && typeof bank === 'object' && 'configured' in bank
+    ? bank : { configured: false, connections: [], redirect_url: '' };
   if (!state.form.account && accounts.length) state.form.account = accounts[0].id;
 }

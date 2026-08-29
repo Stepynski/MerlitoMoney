@@ -4,7 +4,7 @@ import { THEME_STYLES, THEMES } from './themes.js';
 import { saveThemePref } from './state.js';
 import { RED } from './constants.js';
 import { computeView, set, openModal, shiftPeriod, unbudgeted } from './viewmodel.js';
-import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction, downloadTransactionsCsv, downloadBackup, pickBackupFile, restoreBackupAction, openAboutModal, commitImportAction, cancelImportAction } from './actions.js';
+import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction, downloadTransactionsCsv, downloadBackup, pickBackupFile, restoreBackupAction, openAboutModal, commitImportAction, cancelImportAction, syncBankAction, openConnectBank } from './actions.js';
 
 // ---------- event delegation ----------
 export let handlers = [];
@@ -608,6 +608,28 @@ export function renderApp() {
       ${V.importMsg ? `
         <div style="background:${TH.surface};border-radius:16px;padding:14px 16px;font-size:14px;border-left:4px solid ${ACCENT}">${esc(V.importMsg)}</div>` : ''}
 
+      <section style="background:${TH.surface};border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:170px">
+            <div style="font-weight:700;font-size:16px">Fetch from your bank</div>
+            <div style="font-size:12.5px;color:${GREY}">
+              ${!V.bankConfigured
+                ? 'No bank credentials configured on the server yet.'
+                : V.bankConnections.length
+                  ? V.bankConnections.map(c => esc(c.name)).join(', ')
+                  : 'No bank connected yet.'}
+            </div>
+          </div>
+          <select data-change="${H(e => { state.syncDays = e.target.value; render(); })}" style="border:1px solid ${TH.border};border-radius:10px;padding:8px 10px;background:${TH.surface};cursor:pointer;font-size:13.5px">
+            ${V.syncDayOptions.map(o => `<option value="${o[0]}" ${o[0] === V.syncDays ? 'selected' : ''}>${o[1]}</option>`).join('')}
+          </select>
+          <button data-click="${H(() => openConnectBank())}" ${V.bankConfigured ? '' : 'disabled'} style="border:1px solid ${TH.border};background:transparent;border-radius:12px;padding:9px 15px;cursor:${V.bankConfigured ? 'pointer' : 'default'};font-weight:600;font-size:13.5px;color:${V.bankConfigured ? TH.text : GREY}">Connect a bank</button>
+          <button data-click="${H(() => syncBankAction())}" ${V.importBusy || !V.bankConnections.length ? 'disabled' : ''} style="border:0;background:${V.bankConnections.length ? ACCENT : TH.border};color:#fff;border-radius:12px;padding:10px 17px;cursor:${V.bankConnections.length ? 'pointer' : 'default'};font-weight:600;font-size:13.5px">${V.importBusy ? 'Fetching…' : 'Fetch now'}</button>
+        </div>
+        ${V.bankConnections.filter(c => c.expiring).map(c => `
+          <div style="font-size:12.5px;color:${RED};background:${RED}0f;border-radius:10px;padding:8px 10px">${esc(c.name)}: ${esc(c.expiry)}</div>`).join('')}
+      </section>
+
       <section style="background:${TH.surface};border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
         <div style="font-weight:700;font-size:16px;margin-bottom:4px">Bank accounts</div>
         <div style="font-size:13px;color:${GREY};line-height:1.5;margin-bottom:${V.noFeeds ? '0' : '14px'}">
@@ -727,7 +749,7 @@ export function renderApp() {
         <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:${TH.surface2};z-index:2">
           <button data-click="${H(() => { console.log('[mm debug] modal closed via X button, modal was', state.modal); state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
           <span style="font-size:19px;font-weight:700;flex:1">${V.modalTitle}</span>
-          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal || V.isDeleteMovementModal || V.isDeleteAllDataModal || V.isChangePasswordModal || V.isDataModal || V.isBackupsModal || V.isAboutModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
+          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal || V.isDeleteMovementModal || V.isDeleteAllDataModal || V.isChangePasswordModal || V.isDataModal || V.isBackupsModal || V.isAboutModal || V.isConnectBankModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
         </div>
         <div style="padding:0 18px 20px;display:flex;flex-direction:column;gap:14px">
           ${V.isDeleteAccountModal ? `
@@ -1142,6 +1164,27 @@ export function renderApp() {
                   <button data-click="${H(() => restoreBackupAction())}" style="border:0;background:${RED};color:#fff;border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Restore — replace everything</button>
                 ` : ''}
               </div>
+            </div>` : ''}
+
+          ${V.isConnectBankModal ? `
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <p style="margin:0;font-size:13.5px;color:${GREY};line-height:1.5">
+                You will be sent to your bank to approve read-only access. Banks grant it for about 90 days, after which you reconnect here.
+              </p>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Country
+                <select data-change="${H(V.onAspspCountry)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                  ${V.aspspCountryOptions.map(o => `<option value="${o[0]}" ${o[0] === V.aspspCountry ? 'selected' : ''}>${o[1]}</option>`).join('')}
+                </select>
+              </label>
+              ${V.formError ? `<div style="font-size:13px;color:${RED}">${esc(V.formError)}</div>` : ''}
+              ${V.aspspLoading
+                ? `<div style="padding:20px;text-align:center;color:${GREY};font-size:13.5px">Loading banks…</div>`
+                : V.aspspList.length
+                  ? `<div style="display:flex;flex-direction:column;max-height:44vh;overflow:auto">
+                      ${V.aspspList.map(b => `
+                        <button data-click="${H(b.onClick)}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:12px 4px;cursor:pointer;font-size:14.5px">${esc(b.name)}</button>`).join('')}
+                    </div>`
+                  : `<div style="padding:20px;text-align:center;color:${GREY};font-size:13.5px">No banks listed for this country.</div>`}
             </div>` : ''}
 
           ${V.isAboutModal ? `
