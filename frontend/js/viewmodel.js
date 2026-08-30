@@ -191,8 +191,10 @@ export function toggle(key, id) {
 }
 export function openModal(kind, editId, form) {
   state.modal = kind; state.editId = editId || null; state.drawerOpen = false; state.formError = '';
+  const defaultAccount = state.accounts[0] ? state.accounts[0].id : '';
+  const defaultToAccount = (state.accounts.find(a => a.active && a.id !== defaultAccount) || {}).id || '';
   state.form = Object.assign({
-    name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '',
+    name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: defaultAccount, toAccount: defaultToAccount,
     icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '', date: localDateStr(),
     recurMovement: 'Expense', freq: 'monthly', intervalN: '1', weekday: '0', dayOfMonth: '1', monthOfYear: '1',
     nthBusinessDay: '-1', weekendRule: 'none', startDate: localDateStr(), endDate: '', noEnd: true,

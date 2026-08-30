@@ -13,6 +13,17 @@ export async function submit() {
   if ((state.modal === 'movement' || state.modal === 'recurring') && !num(f.amount)) {
     state.formError = 'Enter an amount'; render(); return;
   }
+  // A transfer with no distinct destination account used to save silently as
+  // a one-sided debit (to_account_id null) — money left the source account
+  // and the destination never saw it. This can happen even with the "To
+  // account" dropdown visually showing a selection: its default is a real
+  // account id, but if the "From" account is changed afterwards to match it,
+  // that account drops out of the (now stale) selected value with no change
+  // event to update the form state.
+  const transferKind = state.modal === 'movement' ? f.movement : state.modal === 'recurring' ? f.recurMovement : null;
+  if (transferKind === 'Transfer internal' && (!f.toAccount || f.toAccount === f.account)) {
+    state.formError = 'Choose a destination account'; render(); return;
+  }
   try {
     await submitModal(f);
   } catch (e) {
