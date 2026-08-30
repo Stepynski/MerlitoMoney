@@ -680,8 +680,8 @@ export function computeView() {
   const importRows = s.staged.map(r => {
     const a = acct(r.account_id);
     const isOut = r.direction === 'out';
-    const isTransfer = r.tx_type === 'Transfer internal';
-    const other = r.to_account_id ? acct(r.to_account_id) : null;
+    const movementType = r.movement_type || r.tx_type || (isOut ? 'Expense' : 'Income');
+    const isTransfer = movementType === 'Transfer internal';
     const catOptions = [{ v: '', l: 'Uncategorised' }].concat(
       s.cats.filter(c => c.kind === (isOut ? 'expense' : 'income')).map(c => ({ v: c.id, l: c.name }))
     );
@@ -689,6 +689,14 @@ export function computeView() {
       label, key, active: r.decision === key,
       onClick: () => decideStaged(r.id, key)
     });
+    // Either side of the movement can be pointed at one of the user's own
+    // accounts. The default option keeps whatever the bank called the
+    // counterparty — some banks never name the other side by IBAN, so a
+    // transfer between two own accounts can only be recognised by saying so.
+    const asImported = r.counterparty_name || r.remittance || 'Not my account';
+    const sideOptions = [{ v: '', l: '↗ ' + asImported }].concat(
+      s.accounts.filter(x => x.active).map(x => ({ v: x.id, l: x.name }))
+    );
     return {
       id: r.id,
       date: r.booking_date,
@@ -698,11 +706,16 @@ export function computeView() {
       accountIcon: '#' + (a ? a.icon : 'ic-wallet'),
       amount: money(isOut ? -r.amount : r.amount, !isOut),
       amountColor: isOut ? RED : GREEN,
-      typeLabel: isTransfer ? ('Transfer → ' + (other ? other.name : '?')) : (isOut ? 'Expense' : 'Income'),
+      typeLabel: movementType,
       isTransfer,
       // The two banks either side of one transfer both report it; the queue
       // says so explicitly rather than quietly hiding one of the rows.
       pairNote: r.pair_id ? 'Both banks reported this transfer — it will be imported once.' : '',
+      sideOptions,
+      fromAccount: r.from_account_id || '',
+      toAccount: r.to_account_id || '',
+      onFrom: e => setStagedField(r.id, { from_account_id: e.target.value ? +e.target.value : null }),
+      onTo: e => setStagedField(r.id, { to_account_id: e.target.value ? +e.target.value : null }),
       showCategory: !isTransfer,
       catOptions,
       category: r.category_id || '',

@@ -22,6 +22,7 @@ def _migrate(conn):
         "ALTER TABLE accounts ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE accounts ADD COLUMN include_in_net_worth INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE transactions ADD COLUMN recurring_id INTEGER REFERENCES recurring_rules(id)",
+        "ALTER TABLE import_staging ADD COLUMN from_account_id INTEGER REFERENCES accounts(id)",
     ):
         try:
             conn.execute(stmt)

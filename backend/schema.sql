@@ -120,6 +120,13 @@ CREATE TABLE IF NOT EXISTS import_staging (
     decision TEXT NOT NULL DEFAULT 'pending' CHECK (decision IN ('pending', 'import', 'skip', 'link')),
     tx_type TEXT,
     category_id INTEGER REFERENCES categories(id),
+    -- The two sides of the movement, as the user wants them recorded. NULL
+    -- means "not an account of mine" — the counterparty stays whatever the
+    -- bank called it. account_id above is untouched provenance (which feed
+    -- the row came from); these two are editable, because a bank that does
+    -- not name the other side by IBAN cannot be recognised automatically and
+    -- the user has to be able to say so.
+    from_account_id INTEGER REFERENCES accounts(id),
     to_account_id INTEGER REFERENCES accounts(id),
     note TEXT,
     -- Deliberately not a foreign key: this points at a transaction the user

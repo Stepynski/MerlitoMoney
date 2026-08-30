@@ -15,7 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from auth import check_password, ensure_password_seeded, hash_password
 import enablebanking
-from bankimport import StaleLinkError, commit_staged, refresh_matches, stage_rows
+from bankimport import StaleLinkError, commit_staged, movement_type, refresh_matches, stage_rows
 from db import ensure_default_categories, get_conn, init_db, rows_to_dicts
 from iban import is_valid_iban, normalize_iban
 from datetime import date, datetime
@@ -930,6 +930,9 @@ def list_staged(request: Request):
         # The suggested duplicate is shown side by side with the bank row, so
         # the user can judge the suggestion instead of trusting it.
         for row in rows:
+            # What the row will actually become, derived from its two sides,
+            # so the page never shows a type the commit would disagree with.
+            row["movement_type"] = movement_type(row)
             row["match"] = None
             if row["match_tx_id"]:
                 hit = conn.execute(
@@ -945,6 +948,7 @@ class StagedPatch(BaseModel):
     decision: Optional[str] = None
     tx_type: Optional[str] = None
     category_id: Optional[int] = None
+    from_account_id: Optional[int] = None
     to_account_id: Optional[int] = None
     note: Optional[str] = None
 
@@ -957,12 +961,16 @@ def update_staged(staged_id: int, body: StagedPatch, request: Request):
         return {"ok": True}
     if fields.get("decision") not in (None, "pending", "import", "skip", "link"):
         raise HTTPException(status_code=400, detail="Unknown decision")
-    if fields.get("decision") == "link":
-        with get_conn() as conn:
-            row = conn.execute("SELECT match_tx_id FROM import_staging WHERE id = ?", (staged_id,)).fetchone()
-        if not row or not row["match_tx_id"]:
-            raise HTTPException(status_code=400, detail="Nothing to link this to")
     with get_conn() as conn:
+        row = conn.execute("SELECT * FROM import_staging WHERE id = ?", (staged_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No such row")
+        if fields.get("decision") == "link" and not row["match_tx_id"]:
+            raise HTTPException(status_code=400, detail="Nothing to link this to")
+        merged = dict(row)
+        merged.update(fields)
+        if merged.get("from_account_id") and merged["from_account_id"] == merged.get("to_account_id"):
+            raise HTTPException(status_code=400, detail="A transfer needs two different accounts")
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         conn.execute(f"UPDATE import_staging SET {set_clause} WHERE id = ?", (*fields.values(), staged_id))
     return {"ok": True}

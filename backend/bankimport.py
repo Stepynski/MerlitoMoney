@@ -253,6 +253,23 @@ def classify_transfer(row, ibans):
     return ("Income" if row["direction"] == "in" else "Expense"), None
 
 
+def movement_type(row):
+    """What a staged row will actually become, from its two sides.
+
+    Derived rather than stored so the page and the commit can never disagree:
+    money moving between two accounts the user owns is an internal transfer,
+    and the moment either side stops being one of theirs it is not, whatever
+    was proposed earlier.
+    """
+    src, dst = row.get("from_account_id"), row.get("to_account_id")
+    if src and dst and src != dst:
+        return "Transfer internal"
+    stored = row.get("tx_type")
+    if stored == "Transfer external":
+        return stored
+    return "Income" if row.get("direction") == "in" else "Expense"
+
+
 def pair_two_sided(staged, ibans):
     """Find rows that are two banks reporting the same transfer.
 
@@ -382,7 +399,15 @@ def stage_rows(conn, rows):
 
         enriched = dict(row)
         enriched["account_id"] = feed["account_id"]
-        tx_type, to_account = classify_transfer(enriched, ibans)
+        tx_type, other = classify_transfer(enriched, ibans)
+        # The feed's own account always sits on the side the money moved; the
+        # other side is filled in only when the bank named an IBAN we
+        # recognise. Left NULL it simply means "not one of mine", which the
+        # user can correct on the review page.
+        if row["direction"] == "out":
+            from_account, to_account = feed["account_id"], other
+        else:
+            from_account, to_account = other, feed["account_id"]
         rule = lookup_payee_rule(conn, enriched)
         category_id = rule["category_id"] if rule and tx_type in ("Expense", "Income") else None
         match_tx_id, match_score, match_reason = attach_match(conn, enriched, claimed)
@@ -392,13 +417,14 @@ def stage_rows(conn, rows):
         conn.execute(
             "INSERT INTO import_staging (feed_uuid, account_id, fingerprint, booking_date, value_date, "
             "amount, direction, currency, counterparty_name, counterparty_iban, remittance, raw_json, "
-            "fetched_at, tx_type, category_id, to_account_id, note, match_tx_id, match_score, match_reason) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "fetched_at, tx_type, category_id, from_account_id, to_account_id, note, match_tx_id, "
+            "match_score, match_reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 row["feed_uuid"], feed["account_id"], fp, row["booking_date"], row.get("value_date"),
                 abs(float(row["amount"])), row["direction"], row.get("currency"),
                 row.get("counterparty_name"), _norm_iban(row.get("counterparty_iban")), row.get("remittance"),
-                json.dumps(row.get("raw") or {}), now, tx_type, category_id, to_account,
+                json.dumps(row.get("raw") or {}), now, tx_type, category_id, from_account, to_account,
                 row.get("remittance") or row.get("counterparty_name"),
                 match_tx_id, match_score, match_reason,
             ),
@@ -524,15 +550,20 @@ def commit_staged(conn):
             linked += 1
             continue
 
-        tx_type = row["tx_type"] or ("Income" if row["direction"] == "in" else "Expense")
-        to_account = row["to_account_id"] if tx_type == "Transfer internal" else None
-        account_id = row["account_id"]
-        if tx_type == "Transfer internal" and row["direction"] == "in" and to_account:
-            # money arriving: the other account is the source
-            account_id, to_account = to_account, row["account_id"]
+        tx_type = movement_type(row)
+        if tx_type == "Transfer internal":
+            account_id, to_account = row["from_account_id"], row["to_account_id"]
+        else:
+            # Whichever side is one of the user's own accounts carries the
+            # movement; the other side is a counterparty the ledger does not
+            # model. Falling back to account_id keeps rows staged before the
+            # two sides existed working unchanged.
+            owned = row["to_account_id"] if row["direction"] == "in" else row["from_account_id"]
+            account_id, to_account = owned or row["account_id"], None
         tx_id = _insert(
             conn, row["booking_date"], account_id, to_account, tx_type,
-            row["category_id"], row["amount"], row["note"], external_id,
+            row["category_id"] if tx_type in ("Expense", "Income") else None,
+            row["amount"], row["note"], external_id,
         )
         if row["category_id"] and tx_type in ("Expense", "Income"):
             remember_payee(conn, row, row["category_id"], tx_type)

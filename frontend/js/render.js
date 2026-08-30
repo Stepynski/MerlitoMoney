@@ -700,6 +700,18 @@ export function renderApp() {
 
               ${r.pairNote ? `<div style="font-size:12.5px;color:${GREY};background:${TH.surface2};border-radius:10px;padding:8px 10px">${esc(r.pairNote)}</div>` : ''}
 
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:${GREY}">
+                <span>From</span>
+                <select data-change="${H(r.onFrom)}" style="flex:1;min-width:130px;border:1px solid ${TH.border};border-radius:10px;padding:7px 9px;background:${TH.surface};cursor:pointer;font-size:12.5px;color:${TH.text}">
+                  ${r.sideOptions.map(o => `<option value="${o.v}" ${o.v === r.fromAccount ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+                </select>
+                <svg width="15" height="15" style="flex:none"><use href="#ic-right"></use></svg>
+                <span>To</span>
+                <select data-change="${H(r.onTo)}" style="flex:1;min-width:130px;border:1px solid ${TH.border};border-radius:10px;padding:7px 9px;background:${TH.surface};cursor:pointer;font-size:12.5px;color:${TH.text}">
+                  ${r.sideOptions.map(o => `<option value="${o.v}" ${o.v === r.toAccount ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+                </select>
+              </div>
+
               ${r.hasMatch ? `
                 <div style="border:1px solid ${RED}55;background:${RED}0f;border-radius:10px;padding:9px 11px">
                   <div style="font-size:12.5px;font-weight:600;color:${RED};margin-bottom:2px">You may already have this one</div>
