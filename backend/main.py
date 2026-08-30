@@ -1133,7 +1133,15 @@ def bank_sync(body: BankSyncIn, request: Request):
     require_auth(request)
     date_from, date_to = enablebanking.window(body.days)
     with get_conn() as conn:
-        query = "SELECT * FROM bank_feeds WHERE account_id IS NOT NULL AND sync_enabled = 1 AND retired = 0"
+        # account_name is the label the user actually chose for this account —
+        # bank_feeds.name is whatever the bank itself called it, which for
+        # several ASPSPs is just the account holder's name repeated on every
+        # one of their accounts, making feeds indistinguishable in messages.
+        query = (
+            "SELECT bank_feeds.*, accounts.name AS account_name FROM bank_feeds "
+            "JOIN accounts ON accounts.id = bank_feeds.account_id "
+            "WHERE bank_feeds.account_id IS NOT NULL AND sync_enabled = 1 AND retired = 0"
+        )
         feeds = rows_to_dicts(conn.execute(query).fetchall())
     if body.feed_uuids:
         feeds = [f for f in feeds if f["uuid"] in body.feed_uuids]
@@ -1149,7 +1157,7 @@ def bank_sync(body: BankSyncIn, request: Request):
         except (enablebanking.BankConfigError, enablebanking.BankApiError) as e:
             # One bank being unreachable must not throw away what the others
             # returned; the queue is additive and the failure is reported.
-            errors.append({"feed": feed["name"] or feed["uuid"], "error": str(e)})
+            errors.append({"feed": feed["account_name"], "error": str(e)})
 
     with get_conn() as conn:
         result = stage_rows(conn, rows)
@@ -1175,7 +1183,7 @@ def bank_sync(body: BankSyncIn, request: Request):
                 (feed["account_id"], feed["account_id"], feed["account_id"]),
             ).fetchone()[0]
             ours = row["starting_balance"] + (delta or 0)
-            drift.append({"feed": feed["name"] or feed["uuid"], "bank": reported, "app": round(ours, 2)})
+            drift.append({"feed": feed["account_name"], "bank": reported, "app": round(ours, 2)})
 
     result["errors"] = errors
     result["balances"] = drift

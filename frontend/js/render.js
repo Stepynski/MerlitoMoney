@@ -618,7 +618,7 @@ export function renderApp() {
   const importPage = !V.isImport ? '' : `
     <div style="display:flex;flex-direction:column;gap:14px;animation:kb-up .25s ease both">
       ${V.importMsg ? `
-        <div style="background:${TH.surface};border-radius:16px;padding:14px 16px;font-size:14px;border-left:4px solid ${ACCENT}">${esc(V.importMsg)}</div>` : ''}
+        <div style="background:${TH.surface};border-radius:16px;padding:14px 16px;font-size:14px;border-left:4px solid ${ACCENT};white-space:pre-line;line-height:1.6">${esc(V.importMsg)}</div>` : ''}
 
       <section style="background:${TH.surface};border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:12px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
