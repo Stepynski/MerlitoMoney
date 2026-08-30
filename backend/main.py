@@ -522,6 +522,12 @@ def list_transactions(request: Request, start: Optional[str] = None, end: Option
 @app.post("/api/transactions")
 def create_transaction(body: TransactionIn, request: Request):
     require_auth(request)
+    if body.amount <= 0:
+        # amount is always a magnitude — the type column is what encodes
+        # direction. A negative amount here would flip that: an "Expense"
+        # with amount=-50 adds 50 to the account instead of subtracting it,
+        # silently reversing the transaction it claims to be.
+        raise HTTPException(status_code=400, detail="amount must be greater than zero")
     with get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO transactions (date, account_id, to_account_id, type, category_id, amount, note) "
@@ -547,6 +553,8 @@ def update_transaction(transaction_id: int, body: TransactionPatch, request: Req
     fields = body.dict(exclude_unset=True)
     if not fields:
         return {"ok": True}
+    if "amount" in fields and fields["amount"] is not None and fields["amount"] <= 0:
+        raise HTTPException(status_code=400, detail="amount must be greater than zero")
     with get_conn() as conn:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         conn.execute(
@@ -671,6 +679,8 @@ def list_recurring(request: Request):
 @app.post("/api/recurring")
 def create_recurring(body: RecurringIn, request: Request):
     require_auth(request)
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be greater than zero")
     _validate_recurring(body.freq, body.interval_n, body.weekday, body.day_of_month, body.month_of_year, body.nth_business_day)
     with get_conn() as conn:
         cur = conn.execute(
@@ -691,6 +701,8 @@ def update_recurring(recurring_id: int, body: RecurringPatch, request: Request):
     fields = body.dict(exclude_unset=True)
     if not fields:
         return {"ok": True}
+    if "amount" in fields and fields["amount"] is not None and fields["amount"] <= 0:
+        raise HTTPException(status_code=400, detail="amount must be greater than zero")
     if any(k in fields for k in ("freq", "interval_n", "weekday", "day_of_month", "month_of_year", "nth_business_day")):
         with get_conn() as conn:
             existing = conn.execute("SELECT * FROM recurring_rules WHERE id = ?", (recurring_id,)).fetchone()

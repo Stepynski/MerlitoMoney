@@ -113,6 +113,28 @@ def _account_balance(conn, account_id):
     return balance
 
 
+def _account_balance_asof(conn, account_id, cutoff_date):
+    """Balance for account_id as of the end of cutoff_date — reconstructed
+    by reversing every transaction dated after it out of the current
+    balance. A missed autopay cycle, caught up once the app is opened
+    again, must sweep what was actually owed on its own due date, not
+    whatever has accumulated by today — which could include purchases made
+    since, or an earlier missed cycle's own catch-up sweep already
+    inserted earlier in this same pass. Without this, catching up several
+    missed cycles at once dumped the entire current balance onto the
+    oldest of them and left the later ones with nothing left to sweep."""
+    balance = _account_balance(conn, account_id)
+    cutoff = cutoff_date.isoformat()
+    for r in conn.execute("SELECT type, amount FROM transactions WHERE account_id = ? AND date > ?", (account_id, cutoff)):
+        balance -= r["amount"] if r["type"] == "Income" else -r["amount"]
+    for r in conn.execute(
+        "SELECT amount FROM transactions WHERE to_account_id = ? AND type = 'Transfer internal' AND date > ?",
+        (account_id, cutoff),
+    ):
+        balance -= r["amount"]
+    return balance
+
+
 def _amortized_payment(principal, monthly_rate, n):
     """Standard level-payment amortization formula. n = number of payments
     remaining. Falls back to a plain split for a 0% loan (avoids /0)."""
@@ -149,12 +171,16 @@ def generate_due(conn, today=None):
             if occ is None or occ > ceiling:
                 break
             if rule['amount_mode'] == 'full_balance':
-                # A credit-card autopay: sweep whatever is currently owed
-                # (a running balance, not a billing-cycle snapshot — see
-                # the plan notes). Nothing owed -> nothing to generate,
-                # but the schedule still advances so we don't re-check
-                # the same date forever.
-                owed = -_account_balance(conn, rule['to_account_id'])
+                # A credit-card autopay: sweep whatever was owed as of this
+                # cycle's own due date (a running balance, not a
+                # billing-cycle snapshot — see the plan notes), reconstructed
+                # rather than read off today's figure so that catching up
+                # several missed cycles at once attributes each one its own
+                # correct amount instead of dumping everything onto the
+                # oldest. Nothing owed -> nothing to generate, but the
+                # schedule still advances so we don't re-check the same date
+                # forever.
+                owed = -_account_balance_asof(conn, rule['to_account_id'], occ)
                 amount = round(owed, 2) if owed > 0 else 0
                 if amount:
                     conn.execute(
@@ -187,11 +213,16 @@ def generate_due(conn, today=None):
                 principal_amount = round(payment - interest, 2)
                 if principal_amount > principal:
                     principal_amount = round(principal, 2)
-                conn.execute(
-                    "INSERT INTO transactions (date, account_id, type, category_id, amount, note, recurring_id) "
-                    "VALUES (?, ?, 'Expense', ?, ?, ?, ?)",
-                    (occ.isoformat(), rule['account_id'], rule['category_id'], interest, 'Loan interest', rule['id']),
-                )
+                if interest > 0:
+                    # A 0% loan (or the last cycle, rounded to nothing) has no
+                    # interest to record — inserting a €0.00 "Loan interest"
+                    # row anyway would just be clutter every single cycle,
+                    # inflating that category's movement count for no reason.
+                    conn.execute(
+                        "INSERT INTO transactions (date, account_id, type, category_id, amount, note, recurring_id) "
+                        "VALUES (?, ?, 'Expense', ?, ?, ?, ?)",
+                        (occ.isoformat(), rule['account_id'], rule['category_id'], interest, 'Loan interest', rule['id']),
+                    )
                 conn.execute(
                     "INSERT INTO transactions (date, account_id, to_account_id, type, amount, note, recurring_id) "
                     "VALUES (?, ?, ?, 'Transfer internal', ?, ?, ?)",

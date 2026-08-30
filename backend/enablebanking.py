@@ -151,9 +151,27 @@ def fetch_transactions(account_uid, date_from, date_to):
 
 
 def fetch_balance(account_uid):
-    """The bank's own figure, shown next to ours purely as a drift check."""
+    """The bank's own figure, shown next to ours purely as a drift check.
+
+    A bank typically returns several balance types (Berlin Group/NextGenPSD2
+    codes): CLBD (closing booked), ITBD (interim booked), XPCD (expected,
+    includes pending), and others. MerlitoMoney only ever imports booked
+    transactions, so comparing against anything that includes pending ones
+    would show a drift that isn't real, defeating the point of the check —
+    it exists to catch the bank's feed silently omitting a booked movement
+    (the known Revolut vault-transfer case), not to flag pending activity
+    the app was never going to import anyway. Prefer the booked types and
+    only fall back to whatever else is present if neither is offered.
+    """
     data = _request("GET", f"/accounts/{account_uid}/balances")
-    for b in data.get("balances", []):
+    balances = data.get("balances", [])
+    for wanted in ("CLBD", "ITBD"):
+        for b in balances:
+            if (b.get("balance_type") or "").upper() == wanted:
+                amount = (b.get("balance_amount") or {}).get("amount")
+                if amount is not None:
+                    return float(amount)
+    for b in balances:
         amount = (b.get("balance_amount") or {}).get("amount")
         if amount is not None:
             return float(amount)

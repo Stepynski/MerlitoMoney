@@ -122,7 +122,10 @@ export async function submitModal(f) {
       to_account_id: isTransfer && f.toAccount ? f.toAccount : null,
       type: f.movement,
       category_id: (f.movement === 'Expense' || f.movement === 'Income') ? (f.category || null) : null,
-      amount: num(f.amount),
+      // amount is always a magnitude — direction comes from `type` above,
+      // never from the sign typed here. A stray minus sign used to flip an
+      // Expense into adding money to the account instead of subtracting it.
+      amount: Math.abs(num(f.amount)),
       note: f.note && f.note.trim() ? f.note.trim() : null,
       date: f.date || localDateStr()
     };
@@ -140,7 +143,7 @@ export async function submitModal(f) {
       account_id: f.account,
       to_account_id: isTransfer && f.toAccount ? f.toAccount : null,
       category_id: (f.recurMovement === 'Expense' || f.recurMovement === 'Income') ? (f.category || null) : null,
-      amount: num(f.amount),
+      amount: Math.abs(num(f.amount)),
       note: f.note && f.note.trim() ? f.note.trim() : null,
       freq: f.freq,
       interval_n: Math.max(1, parseInt(f.intervalN, 10) || 1),

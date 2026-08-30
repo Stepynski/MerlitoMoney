@@ -15,7 +15,12 @@ import {
 export function locale() { return state.numberFormat === 'point' ? 'en-US' : 'de-DE'; }
 export function money(v, plus) {
   const s = Math.abs(v).toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return (v < 0 ? '-' : plus && v > 0 ? '+' : '') + s + ' €';
+  // A tiny negative float — floating-point rounding noise from summing many
+  // amounts — rounds to "0.00" at this precision, but v < 0 alone would
+  // still sign it, showing a nonsensical "-0,00 €". Only sign a value that
+  // actually rounds to something nonzero at the precision being displayed.
+  const nonZero = Math.round(Math.abs(v) * 100) !== 0;
+  return (v < 0 && nonZero ? '-' : plus && v > 0 && nonZero ? '+' : '') + s + ' €';
 }
 export function short(v) { return Math.round(v).toLocaleString(locale()) + ' €'; }
 export function num(v) {
@@ -701,7 +706,23 @@ export function computeView() {
   const topIncomeCats = topCatsFor('income', 5);
 
   const prevP = periodFor(shiftedAnchor(-1));
-  const prevExp = s.tx.filter(t => t._date >= prevP.start && t._date <= prevP.end && t.type === 'Expense').reduce((a, t) => a + t.amount, 0);
+  const prevExpFull = s.tx.filter(t => t._date >= prevP.start && t._date <= prevP.end && t.type === 'Expense').reduce((a, t) => a + t.amount, 0);
+  const now = new Date();
+  const periodInProgress = now >= P.start && now < new Date(P.end.getFullYear(), P.end.getMonth(), P.end.getDate() + 1);
+  let prevExp = prevExpFull, trendProrated = false;
+  if (periodInProgress) {
+    // The current period isn't over yet, so T.exp is a partial total. Diffing
+    // it against the previous period's FULL total compares unequal spans —
+    // early in a month this makes spending look like it collapsed purely
+    // because fewer days have passed, nothing to do with how much was
+    // actually spent. Prorating the previous period down to the same
+    // elapsed-day fraction makes the percentage mean something.
+    const elapsedDays = Math.floor((now - P.start) / 86400000) + 1;
+    const currentSpanDays = Math.floor((P.end - P.start) / 86400000) + 1;
+    const prevSpanDays = Math.floor((prevP.end - prevP.start) / 86400000) + 1;
+    prevExp = prevExpFull * Math.min(elapsedDays, currentSpanDays) / prevSpanDays;
+    trendProrated = true;
+  }
   const trendPct = prevExp > 0 ? ((T.exp - prevExp) / prevExp * 100) : (T.exp > 0 ? 100 : 0);
   const expenseDays = new Set(T.rows.filter(t => t.type === 'Expense').map(t => t._date.toDateString()));
   let noSpendDays = 0;
@@ -711,7 +732,7 @@ export function computeView() {
   const insight = {
     avgDaily: money(T.exp / spanDays),
     noSpendDays,
-    trendLabel: (trendPct >= 0 ? '+' : '') + Math.round(trendPct) + '% vs previous period',
+    trendLabel: (trendPct >= 0 ? '+' : '') + Math.round(trendPct) + '% vs ' + (trendProrated ? 'same point last period' : 'previous period'),
     trendColor: trendPct > 0 ? RED : trendPct < 0 ? GREEN : GREY
   };
 
