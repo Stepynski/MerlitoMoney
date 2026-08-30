@@ -1042,6 +1042,15 @@ def bank_connect(body: BankConnectIn, request: Request):
     # The state is held in the session rather than the database: it exists only
     # to prove the browser coming back is the one that left.
     request.session["bank_state"] = state
+    # The callback the bank hits lives behind Caddy on its own HTTPS port
+    # (needed only because the bank refuses a plain-http redirect URL), which
+    # is a different browser origin from wherever the app is normally used.
+    # A bare "/" redirect there would strand the user on that second origin —
+    # its own empty localStorage, so preferences like the theme look reset
+    # even though nothing was actually lost — so where they started from is
+    # remembered and used to send them back.
+    origin = request.headers.get("origin") or str(request.base_url).rstrip("/")
+    request.session["bank_return_origin"] = origin
     return {"url": auth["url"]}
 
 
@@ -1051,14 +1060,19 @@ def bank_callback(request: Request, code: Optional[str] = None, state: Optional[
     """Where the bank sends the browser back after authorisation."""
     require_auth(request)
     expected = request.session.pop("bank_state", None)
+    origin = request.session.pop("bank_return_origin", None) or ""
+
+    def back_to(query):
+        return RedirectResponse(origin + "/?" + query, status_code=303)
+
     if error:
-        return RedirectResponse("/?bank_error=" + error, status_code=303)
+        return back_to("bank_error=" + error)
     if not code or not state or state != expected:
-        return RedirectResponse("/?bank_error=state_mismatch", status_code=303)
+        return back_to("bank_error=state_mismatch")
     try:
         session = enablebanking.create_session(code)
     except (enablebanking.BankConfigError, enablebanking.BankApiError) as e:
-        return RedirectResponse("/?bank_error=" + str(e)[:120], status_code=303)
+        return back_to("bank_error=" + str(e)[:120])
 
     with get_conn() as conn:
         row = conn.execute(
@@ -1097,7 +1111,7 @@ def bank_callback(request: Request, code: Optional[str] = None, state: Optional[
                 "currency = COALESCE(excluded.currency, currency), retired = 0",
                 (acc["uid"], connection_id, inherited, acc.get("iban"), acc.get("name"), acc.get("currency")),
             )
-    return RedirectResponse("/?bank_connected=1", status_code=303)
+    return back_to("bank_connected=1")
 
 
 class BankSyncIn(BaseModel):
