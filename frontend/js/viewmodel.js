@@ -73,6 +73,32 @@ export function totals() {
   });
   return { rows, byCat, counts, exp, inc };
 }
+// Reconstructs total net worth (net-worth-included accounts only) as of
+// just before cutoffExclusive, by walking every transaction dated on or
+// after that point backward out of each account's current balance. This is
+// the only correct way to get a past balance: the server only reports each
+// account's balance *today*, so a historical figure has to be derived, not
+// read off a field. Handles transfers on both sides (source and
+// destination) and treats 'Transfer external' as leaving the tracked
+// accounts entirely, same as the account balance itself already does.
+export function netWorthAt(cutoffExclusive) {
+  const s = state;
+  let result = 0;
+  s.accounts.filter(a => a.include_in_net_worth).forEach(a => {
+    let bal = a.balance;
+    s.tx.forEach(t => {
+      if (t._date < cutoffExclusive) return;
+      if (t.account_id === a.id) {
+        if (t.type === 'Expense') bal += t.amount;
+        else if (t.type === 'Income') bal -= t.amount;
+        else if (t.type === 'Transfer internal' || t.type === 'Transfer external') bal += t.amount;
+      }
+      if (t.type === 'Transfer internal' && t.to_account_id === a.id) bal -= t.amount;
+    });
+    result += bal;
+  });
+  return result;
+}
 export function unbudgeted() { return state.cats.filter(c => c.kind === 'expense' && state.budgets[c.id] === undefined); }
 export function monthlyEquivalent(r) {
   if (r.amount_mode === 'full_balance' || r.amount_mode === 'amortized') return 0; // future amount isn't a fixed number, can't project
@@ -196,11 +222,20 @@ export function computeView() {
       { label: 'Recurring income', value: money(monthlyInc), color: GREEN }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else if (s.page === 'balance') {
-    const net = T.rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0);
+    // Reconstructed, not read off T.rows — T.rows is Expense/Income only and
+    // scoped to whatever accounts happen to have activity, which ignores
+    // transfers, net-worth-excluded accounts, and (for any period but the
+    // current one) everything that happened between the period and today.
+    // Deriving both ends from the same account-balance walk means Start,
+    // Change and End always reconcile by construction.
+    const dayAfterEnd = new Date(P.end); dayAfterEnd.setDate(dayAfterEnd.getDate() + 1);
+    const startBal = netWorthAt(P.start);
+    const endBal = netWorthAt(dayAfterEnd);
+    const net = endBal - startBal;
     cells = [
-      { label: 'Start balance', value: money(total - net), color: GREY },
+      { label: 'Start balance', value: money(startBal), color: GREY },
       { label: 'Change', value: money(net, true), color: net < 0 ? RED : GREEN },
-      { label: 'End balance', value: money(total), color: TH.text }
+      { label: 'End balance', value: money(endBal), color: TH.text }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else if (s.page === 'overview') {
     // Overview has no time-window selector (a snapshot dashboard, not a
