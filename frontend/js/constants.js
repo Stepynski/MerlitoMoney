@@ -1,5 +1,9 @@
 export const RED = '#d93a34', GREEN = '#2f9e44';
-export const APP_VERSION = '2.0.0';
+// major.feature.bugfix — major bumps on a real architectural break (e.g. the
+// move off the Firefly III fork), feature bumps group a batch of new
+// capability and reset bugfix to 0, bugfix bumps group a batch of fixes.
+// Bump this alongside the git tag of the same name when cutting a release.
+export const APP_VERSION = '2.5.3';
 export const PAL = ['#1f6fd0', '#e03b34', '#4caf50', '#f4703a', '#12897f', '#f2a25c', '#7048c8', '#b6d334', '#5b46b8', '#26aee8', '#ef5b8c', '#e8a33d', '#a531b5', '#c0173f', '#8b6ce0'];
 export const ICONS = [
   'ic-cart', 'ic-fork', 'ic-car', 'ic-bag', 'ic-health', 'ic-home', 'ic-play', 'ic-dots', 'ic-salary', 'ic-refresh', 'ic-gift', 'ic-star', 'ic-bank', 'ic-wallet', 'ic-cash', 'ic-piggy', 'ic-transfer', 'ic-receipt',
