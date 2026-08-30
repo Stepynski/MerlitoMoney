@@ -6,3 +6,7 @@ venv/
 *.db-journal
 .env
 /data/
+
+# bank credentials and TLS material — never commit
+/secrets/
+/certs/

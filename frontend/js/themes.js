@@ -16,7 +16,8 @@ export const THEMES = {
         categories: 'linear-gradient(180deg,#f4ecff 0%,#eef0f3 260px)',
         balance: 'linear-gradient(180deg,#e8faf0 0%,#eef0f3 260px)',
         overview: 'linear-gradient(180deg,#fff3e6 0%,#eef0f3 260px)',
-        budget: 'linear-gradient(180deg,#e6faf7 0%,#eef0f3 260px)'
+        budget: 'linear-gradient(180deg,#e6faf7 0%,#eef0f3 260px)',
+        import: 'linear-gradient(180deg,#eaf3ff 0%,#eef0f3 260px)'
       }
     },
     dark: {
@@ -29,7 +30,8 @@ export const THEMES = {
         categories: 'linear-gradient(180deg,#2a2140 0%,#14161b 260px)',
         balance: 'linear-gradient(180deg,#183024 0%,#14161b 260px)',
         overview: 'linear-gradient(180deg,#332714 0%,#14161b 260px)',
-        budget: 'linear-gradient(180deg,#153230 0%,#14161b 260px)'
+        budget: 'linear-gradient(180deg,#153230 0%,#14161b 260px)',
+        import: 'linear-gradient(180deg,#16263a 0%,#14161b 260px)'
       }
     }
   },
@@ -39,14 +41,14 @@ export const THEMES = {
       text: '#0f1a2e', textSoft: '#5b6472', textFaint: '#8a92a0',
       accent: '#1c3f7c', accentSoft: '#e2e8f5',
       hero: 'linear-gradient(120deg,#0f1a2e,#1c3f7c)',
-      tint: { accounts: '#f2f4f7', categories: '#f2f4f7', balance: '#f2f4f7', overview: '#f2f4f7', budget: '#f2f4f7' }
+      tint: { accounts: '#f2f4f7', categories: '#f2f4f7', balance: '#f2f4f7', overview: '#f2f4f7', budget: '#f2f4f7', import: '#f2f4f7' }
     },
     dark: {
       pageBg: '#0b0f17', surface: '#131824', surface2: '#1a2030', border: '#262e40',
       text: '#eef1f5', textSoft: '#8a92a0', textFaint: '#5b6472',
       accent: '#5b8def', accentSoft: '#1e2c4d',
       hero: 'linear-gradient(120deg,#060810,#111b30)',
-      tint: { accounts: '#0b0f17', categories: '#0b0f17', balance: '#0b0f17', overview: '#0b0f17', budget: '#0b0f17' }
+      tint: { accounts: '#0b0f17', categories: '#0b0f17', balance: '#0b0f17', overview: '#0b0f17', budget: '#0b0f17', import: '#0b0f17' }
     }
   },
   kakeibo: {
@@ -60,7 +62,8 @@ export const THEMES = {
         categories: 'linear-gradient(180deg,#f0e2d8 0%,#f7f1e6 260px)',
         balance: 'linear-gradient(180deg,#eee6cd 0%,#f7f1e6 260px)',
         overview: 'linear-gradient(180deg,#f3e0c8 0%,#f7f1e6 260px)',
-        budget: 'linear-gradient(180deg,#efe4cf 0%,#f7f1e6 260px)'
+        budget: 'linear-gradient(180deg,#efe4cf 0%,#f7f1e6 260px)',
+        import: 'linear-gradient(180deg,#ece3d3 0%,#f7f1e6 260px)'
       }
     },
     dark: {
@@ -73,7 +76,8 @@ export const THEMES = {
         categories: 'linear-gradient(180deg,#2c2018 0%,#1c1610 260px)',
         balance: 'linear-gradient(180deg,#2a2414 0%,#1c1610 260px)',
         overview: 'linear-gradient(180deg,#2e2416 0%,#1c1610 260px)',
-        budget: 'linear-gradient(180deg,#2b2416 0%,#1c1610 260px)'
+        budget: 'linear-gradient(180deg,#2b2416 0%,#1c1610 260px)',
+        import: 'linear-gradient(180deg,#272016 0%,#1c1610 260px)'
       }
     }
   },
@@ -83,14 +87,14 @@ export const THEMES = {
       text: '#111111', textSoft: '#666666', textFaint: '#999999',
       accent: '#0a7d5c', accentSoft: '#dff2ea',
       hero: '#111111',
-      tint: { accounts: '#fafafa', categories: '#fafafa', balance: '#fafafa', overview: '#fafafa', budget: '#fafafa' }
+      tint: { accounts: '#fafafa', categories: '#fafafa', balance: '#fafafa', overview: '#fafafa', budget: '#fafafa', import: '#fafafa' }
     },
     dark: {
       pageBg: '#0a0a0a', surface: '#161616', surface2: '#202020', border: '#2e2e2e',
       text: '#f2f2f2', textSoft: '#a0a0a0', textFaint: '#6e6e6e',
       accent: '#2fd996', accentSoft: '#16332a',
       hero: '#000000',
-      tint: { accounts: '#0a0a0a', categories: '#0a0a0a', balance: '#0a0a0a', overview: '#0a0a0a', budget: '#0a0a0a' }
+      tint: { accounts: '#0a0a0a', categories: '#0a0a0a', balance: '#0a0a0a', overview: '#0a0a0a', budget: '#0a0a0a', import: '#0a0a0a' }
     }
   }
 };

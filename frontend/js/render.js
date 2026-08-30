@@ -4,7 +4,7 @@ import { THEME_STYLES, THEMES } from './themes.js';
 import { saveThemePref } from './state.js';
 import { RED } from './constants.js';
 import { computeView, set, openModal, shiftPeriod, unbudgeted } from './viewmodel.js';
-import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction } from './actions.js';
+import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction, downloadTransactionsCsv, downloadBackup, pickBackupFile, restoreBackupAction, openAboutModal, commitImportAction, cancelImportAction, syncBankAction, openConnectBank } from './actions.js';
 
 // ---------- event delegation ----------
 export let handlers = [];
@@ -19,10 +19,22 @@ export function H(fn) { handlers.push(fn); return handlers.length - 1; }
 // this is what caused closing the "add account" modal to also trigger the
 // Overview nav button underneath it. A single delegated listener on a node
 // that's never itself torn down avoids that whole failure class.
+// Selecting text (e.g. an error message) with a drag that overshoots the
+// modal box releases the mouse over the backdrop, and a plain click listener
+// can't tell that apart from an actual "close the modal" click — both fire
+// with the backdrop as the target. Tracking where the drag *started* fixes
+// it: a backdrop click only closes the modal if the mousedown was on the
+// backdrop too, not merely the mouseup that produced the click.
+let mouseDownTarget = null;
+
 export function wireOnce(root) {
+  root.addEventListener('mousedown', e => { mouseDownTarget = e.target; });
   root.addEventListener('click', e => {
     const el = e.target.closest('[data-click]');
-    if (el) handlers[+el.dataset.click](e);
+    if (el) {
+      if (el.dataset.backdrop === '1' && mouseDownTarget !== el) return;
+      handlers[+el.dataset.click](e);
+    }
   });
   root.addEventListener('change', e => {
     const el = e.target.closest('[data-change]');
@@ -51,12 +63,19 @@ export function themeSettingsHtml() {
           </button>`;
         }).join('')}
       </div>
+      <div style="height:1px;background:${TH.border};margin:2px 0"></div>
+      <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em">Number format</span>
+      <div style="display:flex;gap:8px">
+        ${[['comma', '1.234,56'], ['point', '1,234.56']].map(([f, example]) => {
+          const on = state.numberFormat === f;
+          return `<button data-click="${H(() => { state.numberFormat = f; saveThemePref('mm_number_format', f); render(); })}" style="flex:1;border:1.5px solid ${on ? ACCENT : TH.border};background:${on ? TH.accentSoft : 'transparent'};color:${on ? ACCENT : TH.text};border-radius:10px;padding:9px;cursor:pointer;font-weight:600;font-size:13.5px;font-variant-numeric:tabular-nums">${example}</button>`;
+        }).join('')}
+      </div>
     </div>`;
 }
 
 // ---------- rendering ----------
 export function render() {
-  console.log('[mm debug] render()', { page: state.page, modal: state.modal, editId: state.editId, narrow: state.narrow });
   applyTheme();
   handlers = [];
   const root = document.getElementById('root');
@@ -85,6 +104,16 @@ export function render() {
   if (newPwInput) newPwInput.addEventListener('input', e => set('newPassword', e.target.value));
   const confirmPwInput = root.querySelector('#f-confirm-new-password');
   if (confirmPwInput) confirmPwInput.addEventListener('input', e => set('confirmNewPassword', e.target.value));
+  const loanRateInput = root.querySelector('#f-loan-rate');
+  if (loanRateInput) loanRateInput.addEventListener('input', e => set('loanRate', e.target.value));
+  const loanTermInput = root.querySelector('#f-loan-term');
+  if (loanTermInput) loanTermInput.addEventListener('input', e => set('loanTermMonths', e.target.value));
+  const extraPaymentAmountInput = root.querySelector('#f-extra-payment-amount');
+  if (extraPaymentAmountInput) extraPaymentAmountInput.addEventListener('input', e => set('extraPaymentAmount', e.target.value));
+  const backupPwInput = root.querySelector('#f-backup-password');
+  if (backupPwInput) backupPwInput.addEventListener('input', e => set('backupPassword', e.target.value));
+  const backupConfirmInput = root.querySelector('#f-backup-confirm');
+  if (backupConfirmInput) backupConfirmInput.addEventListener('input', e => set('backupConfirm', e.target.value));
   const pwInput = root.querySelector('#f-password');
   if (pwInput) pwInput.focus();
 }
@@ -122,6 +151,7 @@ export function renderApp() {
       ${iconBtn(V, 'Search', 'ic-search', 20, () => { state.page = 'balance'; state.balanceTab = 'movements'; state.filtersOpen = true; render(); })}
     </div>
 
+    ${V.isOverview ? '' : `
     <div style="display:flex;align-items:center;justify-content:center;gap:clamp(8px,3vw,26px);padding:2px clamp(10px,2.4vw,20px) 12px">
       <button data-click="${H(() => { shiftPeriod(-1); render(); })}" aria-label="Previous period" style="border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${ACCENT};flex:none"><svg width="20" height="20"><use href="#ic-left"></use></svg></button>
       <div style="position:relative;border:1px solid ${TH.border};border-radius:14px;padding:7px 16px;min-width:min(300px,72vw);text-align:center;background:${TH.surface}">
@@ -136,7 +166,7 @@ export function renderApp() {
         </select>
       </div>
       <button data-click="${H(() => { shiftPeriod(1); render(); })}" aria-label="Next period" style="border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${ACCENT};flex:none"><svg width="20" height="20"><use href="#ic-right"></use></svg></button>
-    </div>
+    </div>`}
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid ${TH.border};background:${TH.surface2}">
       ${V.summaryCells.map(c => `
@@ -179,15 +209,25 @@ export function renderApp() {
                       </span>
                       <span style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${a.utilLabel}</span>
                     </span>` : ''}
+                  ${a.hasPayoff ? `
+                    <span style="display:flex;align-items:center;gap:9px;margin-top:2px">
+                      <span style="flex:1;height:7px;border-radius:4px;background:#e9ebef;overflow:hidden;display:block">
+                        <span style="display:block;height:100%;width:${a.payoffPct};background:#40c057"></span>
+                      </span>
+                      <span style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${a.payoffLabel}</span>
+                    </span>` : ''}
                   ${a.autopayLabel ? `<span style="font-size:12px;color:${TH.textFaint}">${a.autopayLabel}</span>` : ''}
+                  ${a.loanLabel ? `<span style="font-size:12px;color:${TH.textFaint}">${a.loanLabel}</span>` : ''}
                 </span>
                 <span style="font-size:12px;color:${TH.textFaint};text-align:right;flex:none">${a.meta}</span>
               </button>
+              ${a.isLoan ? `<button data-click="${H(a.onExtraPayment)}" aria-label="Add extra payment on ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-piggy"></use></svg></button>` : ''}
+              <button data-click="${H(a.onToggleNetWorth)}" aria-label="${a.includedInNetWorth ? 'Exclude' : 'Include'} ${esc(a.name)} from net worth" title="${a.includedInNetWorth ? 'Counted in net worth — click to exclude' : 'Excluded from net worth — click to include'}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${a.includedInNetWorth ? GREY : TH.textFaint};flex:none"><svg width="16" height="16"><use href="#${a.includedInNetWorth ? 'ic-eye' : 'ic-eye-off'}"></use></svg></button>
               <button data-click="${H(a.onEdit)}" aria-label="Edit ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-edit"></use></svg></button>
               <button data-click="${H(a.onDelete)}" aria-label="Delete ${esc(a.name)}" style="border:0;background:transparent;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${GREY};flex:none"><svg width="16" height="16"><use href="#ic-trash"></use></svg></button>
             </div>`).join('')}
         </section>`).join('')}
-      <button data-click="${H(() => { console.log('[mm debug] Add account clicked, page is', state.page); openModal('account'); })}" style="align-self:flex-start;border:1px solid ${TH.border};background:${TH.surface};border-radius:12px;padding:11px 18px;cursor:pointer;font-weight:600;color:${ACCENT};display:flex;align-items:center;gap:8px">
+      <button data-click="${H(() => openModal('account'))}" style="align-self:flex-start;border:1px solid ${TH.border};background:${TH.surface};border-radius:12px;padding:11px 18px;cursor:pointer;font-weight:600;color:${ACCENT};display:flex;align-items:center;gap:8px">
         <svg width="18" height="18"><use href="#ic-plus"></use></svg>Add account
       </button>
       ${V.closedAccounts.length ? `
@@ -353,7 +393,10 @@ export function renderApp() {
       <div class="mm-dash-hero">
         <section style="background:${TH.surface};border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:8px">
           <div style="display:flex;justify-content:space-between;align-items:baseline">
-            <span style="font-weight:700;font-size:15px">Net worth</span>
+            <span style="display:flex;align-items:baseline;gap:6px">
+              <span style="font-weight:700;font-size:15px">Net worth</span>
+              <span style="font-size:11px;color:${TH.textFaint}">Last 6 months</span>
+            </span>
             <span style="font-weight:600;color:${V.netWorthTrend.changeColor};font-size:13px">${V.netWorthTrend.changeLabel}</span>
           </div>
           <span style="font-size:25px;font-weight:700;font-variant-numeric:tabular-nums">${V.netWorthTrend.current}</span>
@@ -381,7 +424,36 @@ export function renderApp() {
         </div>
       </div>
 
+      ${V.hasLoanPayoff ? `
+      <section style="background:${TH.surface};border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px">
+          <span style="font-weight:700;font-size:15px">Loan payoff projection</span>
+          <span style="font-size:12px;color:${GREY}">Estimated payoff: ${V.loanPayoffTrend.payoffLabel}</span>
+        </div>
+        <div style="display:flex;gap:18px;flex-wrap:wrap">
+          <span style="display:flex;flex-direction:column;gap:1px">
+            <span style="font-size:11px;color:${GREY};display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:#e8890c;display:inline-block"></span>Owed today</span>
+            <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${V.loanPayoffTrend.current}</span>
+          </span>
+          <span style="display:flex;flex-direction:column;gap:1px">
+            <span style="font-size:11px;color:${GREY};display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:#5c7cfa;display:inline-block"></span>Interest paid to date</span>
+            <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${V.loanPayoffTrend.interestPaid}</span>
+          </span>
+        </div>
+        <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:90px;display:block;overflow:visible">
+          <path d="${V.loanPayoffTrend.area}" fill="#e8890c1f" stroke="none"></path>
+          <line x1="${V.loanPayoffTrend.todayX}" y1="0" x2="${V.loanPayoffTrend.todayX}" y2="34" stroke="${TH.textFaint}" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>
+          <path d="${V.loanPayoffTrend.interestPath}" fill="none" stroke="#5c7cfa" stroke-width="1.3" vector-effect="non-scaling-stroke"></path>
+          <path d="${V.loanPayoffTrend.path}" fill="none" stroke="#e8890c" stroke-width="1.6" vector-effect="non-scaling-stroke"></path>
+        </svg>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:${TH.textFaint}">
+          ${V.loanPayoffTrend.labels.map(l => `<span>${l}</span>`).join('')}
+        </div>
+        <span style="font-size:11px;color:${TH.textFaint}">Orange: balance owed. Blue: cumulative interest paid. Dashed line marks today — everything after it is a projection assuming today's rate and no further prepayments.</span>
+      </section>` : ''}
+
       <section style="background:${TH.surface};border-radius:16px;padding:16px 16px 12px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+        <span style="font-weight:700;font-size:15px;display:block;padding-bottom:10px">${V.spendChartTitle}</span>
         <div style="display:grid;grid-template-columns:46px 1fr;gap:6px">
           <div style="display:flex;flex-direction:column;justify-content:space-between;height:210px;font-size:11px;color:${TH.textFaint};text-align:right;font-variant-numeric:tabular-nums;padding-right:4px">
             ${V.axis.map(a => `<span>${a}</span>`).join('')}
@@ -408,13 +480,13 @@ export function renderApp() {
 
       <div class="mm-dash-split">
         <section style="display:flex;flex-direction:column;gap:8px">
-          <span style="font-weight:700;font-size:15px;padding:0 4px">Top expense categories</span>
+          <span style="font-weight:700;font-size:15px;padding:0 4px">Top expense categories <span style="font-weight:500;color:${GREY};font-size:12.5px">· ${V.periodTitle}</span></span>
           <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
             ${V.topExpenseCats.length ? catMiniList(V.topExpenseCats) : `<div style="padding:24px 16px;text-align:center;color:${GREY};font-size:13.5px">No expenses yet.</div>`}
           </div>
         </section>
         <section style="display:flex;flex-direction:column;gap:8px">
-          <span style="font-weight:700;font-size:15px;padding:0 4px">Top income categories</span>
+          <span style="font-weight:700;font-size:15px;padding:0 4px">Top income categories <span style="font-weight:500;color:${GREY};font-size:12.5px">· ${V.periodTitle}</span></span>
           <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
             ${V.topIncomeCats.length ? catMiniList(V.topIncomeCats) : `<div style="padding:24px 16px;text-align:center;color:${GREY};font-size:13.5px">No income yet.</div>`}
           </div>
@@ -426,18 +498,21 @@ export function renderApp() {
         <span style="font-weight:700;font-size:15px;padding:0 4px">Accounts</span>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:2px 4px 6px">
           ${V.dashboardAccounts.map(a => `
-            <button data-click="${H(a.onClick)}" style="background:${TH.surface};border:0;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,0.06);text-align:left">
-              <span style="width:32px;height:32px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center"><svg width="16" height="16"><use href="${a.icon}"></use></svg></span>
-              <span style="font-size:12.5px;color:${GREY};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.name}</span>
-              <span style="font-weight:600;font-variant-numeric:tabular-nums;font-size:14px">${a.balance}</span>
-            </button>`).join('')}
+            <div style="position:relative;background:${TH.surface};border-radius:14px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+              <button data-click="${H(a.onClick)}" style="width:100%;border:0;background:transparent;padding:12px;display:flex;flex-direction:column;gap:8px;cursor:pointer;text-align:left">
+                <span style="width:32px;height:32px;border-radius:50%;background:${a.color};color:#fff;display:grid;place-items:center"><svg width="16" height="16"><use href="${a.icon}"></use></svg></span>
+                <span style="font-size:12.5px;color:${GREY};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:20px">${a.name}</span>
+                <span style="font-weight:600;font-variant-numeric:tabular-nums;font-size:14px">${a.balance}</span>
+              </button>
+              <button data-click="${H(a.onToggleNetWorth)}" aria-label="${a.includedInNetWorth ? 'Exclude' : 'Include'} ${esc(a.name)} from net worth" title="${a.includedInNetWorth ? 'Counted in net worth — click to exclude' : 'Excluded from net worth — click to include'}" style="position:absolute;top:8px;right:8px;border:0;background:${TH.surface2};width:24px;height:24px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:${a.includedInNetWorth ? GREY : TH.textFaint}"><svg width="12" height="12"><use href="#${a.includedInNetWorth ? 'ic-eye' : 'ic-eye-off'}"></use></svg></button>
+            </div>`).join('')}
         </div>
       </section>` : ''}
 
       ${V.budgetWatch.length ? `
       <section style="display:flex;flex-direction:column;gap:8px">
         <div style="display:flex;justify-content:space-between;align-items:baseline;padding:0 4px">
-          <span style="font-weight:700;font-size:15px">Budget status</span>
+          <span style="font-weight:700;font-size:15px">Budget status <span style="font-weight:500;color:${GREY};font-size:12.5px">· ${V.periodTitle}</span></span>
           <button data-click="${H(() => { state.page = 'budget'; render(); })}" style="border:0;background:transparent;color:${ACCENT};font-weight:600;cursor:pointer;font-size:13px;padding:0">See all</button>
         </div>
         <div style="background:${V.globalBg};border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
@@ -539,14 +614,130 @@ export function renderApp() {
       </section>
     </div>`;
 
+  const importPage = !V.isImport ? '' : `
+    <div style="display:flex;flex-direction:column;gap:14px;animation:kb-up .25s ease both">
+      ${V.importMsg ? `
+        <div style="background:${TH.surface};border-radius:16px;padding:14px 16px;font-size:14px;border-left:4px solid ${ACCENT};white-space:pre-line;line-height:1.6">${esc(V.importMsg)}</div>` : ''}
+
+      <section style="background:${TH.surface};border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:170px">
+            <div style="font-weight:700;font-size:16px">Fetch from your bank</div>
+            <div style="font-size:12.5px;color:${GREY}">
+              ${!V.bankConfigured
+                ? 'No bank credentials configured on the server yet.'
+                : V.bankConnections.length
+                  ? V.bankConnections.map(c => esc(c.name)).join(', ')
+                  : 'No bank connected yet.'}
+            </div>
+          </div>
+          <select data-change="${H(e => { state.syncDays = e.target.value; render(); })}" style="border:1px solid ${TH.border};border-radius:10px;padding:8px 10px;background:${TH.surface};cursor:pointer;font-size:13.5px">
+            ${V.syncDayOptions.map(o => `<option value="${o[0]}" ${o[0] === V.syncDays ? 'selected' : ''}>${o[1]}</option>`).join('')}
+          </select>
+          <button data-click="${H(() => openConnectBank())}" ${V.bankConfigured ? '' : 'disabled'} style="border:1px solid ${TH.border};background:transparent;border-radius:12px;padding:9px 15px;cursor:${V.bankConfigured ? 'pointer' : 'default'};font-weight:600;font-size:13.5px;color:${V.bankConfigured ? TH.text : GREY}">Connect a bank</button>
+          <button data-click="${H(() => syncBankAction())}" ${V.importBusy || !V.bankConnections.length ? 'disabled' : ''} style="border:0;background:${V.bankConnections.length ? ACCENT : TH.border};color:#fff;border-radius:12px;padding:10px 17px;cursor:${V.bankConnections.length ? 'pointer' : 'default'};font-weight:600;font-size:13.5px">${V.importBusy ? 'Fetching…' : 'Fetch now'}</button>
+        </div>
+        ${V.bankConnections.filter(c => c.expiring).map(c => `
+          <div style="font-size:12.5px;color:${RED};background:${RED}0f;border-radius:10px;padding:8px 10px">${esc(c.name)}: ${esc(c.expiry)}</div>`).join('')}
+      </section>
+
+      <section style="background:${TH.surface};border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+        <div style="font-weight:700;font-size:16px;margin-bottom:4px">Bank accounts</div>
+        <div style="font-size:13px;color:${GREY};line-height:1.5;margin-bottom:${V.noFeeds ? '0' : '14px'}">
+          ${V.noFeeds
+            ? 'No bank is connected yet. Once a bank is linked, each account it reports shows up here to be matched with one of your own accounts.'
+            : 'Each account your bank reports has to point at one of your own accounts before its transactions can be reviewed.'}
+        </div>
+        ${V.importFeeds.map(f => `
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid ${TH.border};flex-wrap:wrap">
+            <div style="flex:1;min-width:160px">
+              <div style="font-weight:600;font-size:14px">${esc(f.name)}</div>
+              ${f.iban ? `<div style="font-size:12px;color:${GREY};font-variant-numeric:tabular-nums">${esc(f.iban)}</div>` : ''}
+            </div>
+            <select data-change="${H(f.onMap)}" style="border:1px solid ${TH.border};border-radius:10px;padding:8px 10px;background:${TH.surface};cursor:pointer;font-size:13.5px">
+              ${f.accountOptions.map(o => `<option value="${o.v}" ${o.v === f.mappedTo ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+            </select>
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:${GREY}">
+              <input type="checkbox" data-change="${H(f.onToggleSync)}" ${f.syncEnabled ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer">Sync
+            </label>
+          </div>`).join('')}
+      </section>
+
+      ${V.noStaged ? `
+        <section style="background:${TH.surface};border-radius:16px;padding:44px 20px;text-align:center;color:${GREY};box-shadow:0 1px 2px rgba(16,24,40,0.06)">
+          Nothing waiting to be reviewed. Transactions fetched from your bank land here first — nothing reaches your accounts until you say so.
+        </section>` : `
+        <section style="background:${TH.surface};border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06);display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="flex:1;min-width:150px">
+              <div style="font-weight:700;font-size:16px">${V.stagedPending} to review</div>
+              <div style="font-size:12.5px;color:${GREY}">${V.stagedReady} decided${V.stagedFlagged ? ` · ${V.stagedFlagged} look like duplicates` : ''}</div>
+            </div>
+            <button data-click="${H(() => cancelImportAction())}" ${V.importBusy ? 'disabled' : ''} style="border:1px solid ${TH.border};background:transparent;color:${RED};border-radius:12px;padding:9px 15px;cursor:pointer;font-weight:600;font-size:13.5px">Discard all</button>
+            <button data-click="${H(() => commitImportAction())}" ${V.importBusy || !V.stagedReady ? 'disabled' : ''} style="border:0;background:${V.stagedReady ? ACCENT : TH.border};color:#fff;border-radius:12px;padding:10px 17px;cursor:${V.stagedReady ? 'pointer' : 'default'};font-weight:600;font-size:13.5px">Apply ${V.stagedReady || ''} decision${V.stagedReady === 1 ? '' : 's'}</button>
+          </div>
+        </section>
+
+        <section style="background:${TH.surface};border-radius:16px;box-shadow:0 1px 2px rgba(16,24,40,0.06);overflow:hidden">
+          ${V.importRows.map(r => `
+            <div style="padding:14px 16px;border-bottom:1px solid ${TH.border};display:flex;flex-direction:column;gap:10px;${r.decided ? 'background:' + TH.accentSoft + '33' : ''}">
+              <div style="display:flex;align-items:flex-start;gap:12px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-weight:600;font-size:14.5px">${esc(r.title)}</div>
+                  <div style="font-size:12.5px;color:${GREY};display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                    <span style="font-variant-numeric:tabular-nums">${r.date}</span>
+                    <span>·</span>
+                    <svg width="13" height="13"><use href="${r.accountIcon}"></use></svg>
+                    <span>${esc(r.account)}</span>
+                    <span>·</span>
+                    <span>${esc(r.typeLabel)}</span>
+                  </div>
+                  ${r.detail ? `<div style="font-size:12px;color:${GREY};margin-top:2px">${esc(r.detail)}</div>` : ''}
+                </div>
+                <span style="font-weight:700;font-variant-numeric:tabular-nums;color:${r.amountColor};white-space:nowrap">${r.amount}</span>
+              </div>
+
+              ${r.pairNote ? `<div style="font-size:12.5px;color:${GREY};background:${TH.surface2};border-radius:10px;padding:8px 10px">${esc(r.pairNote)}</div>` : ''}
+
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:${GREY}">
+                <span>From</span>
+                <select data-change="${H(r.onFrom)}" style="flex:1;min-width:130px;border:1px solid ${TH.border};border-radius:10px;padding:7px 9px;background:${TH.surface};cursor:pointer;font-size:12.5px;color:${TH.text}">
+                  ${r.sideOptions.map(o => `<option value="${o.v}" ${o.v === r.fromAccount ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+                </select>
+                <svg width="15" height="15" style="flex:none"><use href="#ic-right"></use></svg>
+                <span>To</span>
+                <select data-change="${H(r.onTo)}" style="flex:1;min-width:130px;border:1px solid ${TH.border};border-radius:10px;padding:7px 9px;background:${TH.surface};cursor:pointer;font-size:12.5px;color:${TH.text}">
+                  ${r.sideOptions.map(o => `<option value="${o.v}" ${o.v === r.toAccount ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+                </select>
+              </div>
+
+              ${r.hasMatch ? `
+                <div style="border:1px solid ${RED}55;background:${RED}0f;border-radius:10px;padding:9px 11px">
+                  <div style="font-size:12.5px;font-weight:600;color:${RED};margin-bottom:2px">You may already have this one</div>
+                  <div style="font-size:12.5px">${esc(r.matchText)}</div>
+                  ${r.matchReason ? `<div style="font-size:11.5px;color:${GREY};margin-top:3px">${esc(r.matchReason)}</div>` : ''}
+                </div>` : ''}
+
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                ${r.buttons.map(b => `
+                  <button data-click="${H(b.onClick)}" style="border:1px solid ${b.active ? ACCENT : TH.border};background:${b.active ? ACCENT : 'transparent'};color:${b.active ? '#fff' : GREY};border-radius:999px;padding:6px 13px;cursor:pointer;font-size:12.5px;font-weight:600">${b.label}</button>`).join('')}
+                ${r.showCategory ? `
+                  <select data-change="${H(r.onCategory)}" style="margin-left:auto;border:1px solid ${TH.border};border-radius:10px;padding:7px 10px;background:${TH.surface};cursor:pointer;font-size:12.5px">
+                    ${r.catOptions.map(o => `<option value="${o.v}" ${o.v === r.category ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+                  </select>` : ''}
+              </div>
+            </div>`).join('')}
+        </section>`}
+    </div>`;
+
   const main = `<main style="flex:1;width:100%;background:${V.pageTint};transition:background .3s ease">
     <div style="max-width:${V.isNarrow ? '1080px' : '1600px'};margin:0 auto;padding:14px clamp(10px,2.4vw,28px) 110px;display:flex;flex-direction:column;gap:14px">
-      ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}
+      ${accountsPage}${categoriesPage}${balancePage}${overviewPage}${budgetPage}${importPage}
     </div>
   </main>`;
 
   const bottomNav = !V.isNarrow ? '' : `
-    <nav style="position:fixed;left:0;right:0;bottom:0;z-index:30;background:${TH.surface};border-top:1px solid ${TH.border};display:grid;grid-template-columns:repeat(5,1fr);padding:6px 4px 8px">
+    <nav style="position:fixed;left:0;right:0;bottom:0;z-index:30;background:${TH.surface};border-top:1px solid ${TH.border};display:grid;grid-template-columns:repeat(${V.navItems.length},1fr);padding:6px 4px 8px">
       ${V.navItems.map(n => `
         <button data-click="${H(n.onClick)}" style="border:0;background:transparent;padding:4px 2px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:${n.color}">
           <span style="padding:4px 16px;border-radius:14px;background:${n.pill};display:grid;place-items:center"><svg width="22" height="22"><use href="${n.icon}"></use></svg></span>
@@ -555,7 +746,7 @@ export function renderApp() {
     </nav>`;
 
   const drawer = !V.drawerOpen ? '' : `
-    <div data-click="${H(() => { state.drawerOpen = false; render(); })}" style="position:fixed;inset:0;z-index:60;background:rgba(20,24,32,0.42);animation:kb-in .18s ease both">
+    <div data-click="${H(() => { state.drawerOpen = false; render(); })}" data-backdrop="1" style="position:fixed;inset:0;z-index:60;background:rgba(20,24,32,0.42);animation:kb-in .18s ease both">
       <div data-click="${H(e => e.stopPropagation())}" style="width:min(300px,82vw);height:100%;background:${TH.surface2};display:flex;flex-direction:column;box-shadow:4px 0 24px rgba(16,24,40,0.2)">
         <div style="background:${TH.hero};padding:22px 20px 18px;display:flex;flex-direction:column;gap:10px">
           <span style="width:56px;height:56px;border-radius:18px;background:#ffd43b;display:grid;place-items:center;overflow:hidden"><img src="cat-logo.png" alt="MerlitoMoney" style="width:74%;height:74%;object-fit:contain"></span>
@@ -566,7 +757,7 @@ export function renderApp() {
           <svg width="21" height="21" style="color:${GREY}"><use href="#ic-gear"></use></svg>Settings
         </button>
         ${V.drawerItems.map(d => `
-          <button data-click="${H(() => { state.drawerOpen = false; render(); })}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px">
+          <button data-click="${H(() => d.onClick())}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px">
             <svg width="21" height="21" style="color:${GREY}"><use href="${d.icon}"></use></svg>${d.label}
           </button>`).join('')}
         <button data-click="${H(() => logoutAction())}" style="border:0;background:transparent;text-align:left;padding:15px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${RED};margin-top:auto">
@@ -576,12 +767,12 @@ export function renderApp() {
     </div>`;
 
   const modal = !V.showModal ? '' : `
-    <div data-click="${H(() => { console.log('[mm debug] modal closed via backdrop, modal was', state.modal); state.modal = null; render(); })}" style="position:fixed;inset:0;z-index:70;background:rgba(20,24,32,0.42);display:flex;align-items:center;justify-content:center;padding:16px;animation:kb-in .16s ease both">
+    <div data-click="${H(() => { state.modal = null; render(); })}" data-backdrop="1" style="position:fixed;inset:0;z-index:70;background:rgba(20,24,32,0.42);display:flex;align-items:center;justify-content:center;padding:16px;animation:kb-in .16s ease both">
       <div data-click="${H(e => e.stopPropagation())}" style="background:${TH.surface2};border-radius:22px;width:100%;max-width:460px;max-height:88vh;overflow:auto;box-shadow:0 24px 60px rgba(16,24,40,0.3);animation:kb-up .2s ease both">
         <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:${TH.surface2};z-index:2">
-          <button data-click="${H(() => { console.log('[mm debug] modal closed via X button, modal was', state.modal); state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
+          <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
           <span style="font-size:19px;font-weight:700;flex:1">${V.modalTitle}</span>
-          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal || V.isDeleteMovementModal || V.isDeleteAllDataModal || V.isChangePasswordModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
+          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal || V.isDeleteMovementModal || V.isDeleteAllDataModal || V.isChangePasswordModal || V.isDataModal || V.isBackupsModal || V.isAboutModal || V.isConnectBankModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
         </div>
         <div style="padding:0 18px 20px;display:flex;flex-direction:column;gap:14px">
           ${V.isDeleteAccountModal ? `
@@ -593,6 +784,25 @@ export function renderApp() {
               <button data-click="${H(() => deleteAccountAction())}" style="border:0;background:${TH.surface};color:${RED};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
                 <svg width="18" height="18"><use href="#ic-trash"></use></svg>Delete account &amp; all movements
               </button>
+            </div>` : ''}
+
+          ${V.isExtraPaymentModal ? `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <p style="margin:0;font-size:14px;color:${GREY};line-height:1.5">
+                Extra principal payment on <strong style="color:${TH.text}">${esc(V.extraPaymentAccountName)}</strong> (currently owed: <strong style="color:${TH.text}">${V.extraPaymentOwed}</strong>). This reduces the debt immediately, and the next scheduled payment is recalculated for the remaining term automatically.
+              </p>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Pay from
+                <select data-change="${H(e => { set('extraPaymentFrom', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                  ${V.extraPaymentFromOptions.map(o => `<option value="${o.v}" ${o.v === V.formExtraPaymentFrom ? 'selected' : ''}>${o.l}</option>`).join('')}
+                </select>
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Amount
+                <input id="f-extra-payment-amount" value="${esc(V.formExtraPaymentAmount)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Date
+                <input type="date" data-change="${H(e => { set('extraPaymentDate', e.target.value); render(); })}" value="${V.formExtraPaymentDate}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none;color-scheme:${state.themeMode}">
+              </label>
+              ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
             </div>` : ''}
 
           ${V.isDeleteMovementModal ? `
@@ -613,7 +823,7 @@ export function renderApp() {
               <div style="background:${TH.surface};border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:6px;align-items:center">
                 <span style="font-size:12px;color:${GREY};letter-spacing:0.06em;text-transform:uppercase">${V.movementKind}</span>
                 <input id="f-amount" value="${esc(V.formAmount)}" placeholder="0,00 €" inputmode="decimal" style="border:0;background:transparent;text-align:center;font-size:30px;font-weight:700;width:100%;font-variant-numeric:tabular-nums;outline:none">
-                <span style="font-size:12.5px;color:${GREY}">${V.todayLabel}</span>
+                <input type="date" data-change="${H(e => { set('date', e.target.value); render(); })}" value="${V.formDate}" style="border:0;background:transparent;text-align:center;font-size:12.5px;color:${GREY};cursor:pointer;outline:none;font-family:inherit;color-scheme:${state.themeMode}">
               </div>
               ${!V.isTransferMovement ? `
                 <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -636,6 +846,7 @@ export function renderApp() {
               <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Description (optional)
                 <input id="f-note" value="${esc(V.formNote)}" placeholder="e.g. Weekly groceries" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
               </label>
+              ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
             </div>` : ''}
 
           ${V.isAccountModal ? `
@@ -653,7 +864,7 @@ export function renderApp() {
               <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Name
                 <input id="f-name" value="${esc(V.formName)}" placeholder="e.g. Everyday account" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
               </label>
-              ${V.isCreditKind ? `
+              ${V.isCreditKind || V.isLoanKind ? `
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">${V.balanceLabel}
                   <input id="f-balance" value="${esc(V.formBalance)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>` : `
@@ -667,7 +878,7 @@ export function renderApp() {
                   <input id="f-balance" value="${esc(V.formBalance)}" placeholder="0,00" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>
               </div>`}
-              ${V.isSavingsKind || V.isCreditKind ? `
+              ${V.isSavingsKind || V.isCreditKind || V.isLoanKind ? `
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">${V.goalLabel}
                   <input id="f-goal" value="${esc(V.formGoal)}" placeholder="10.000" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
                 </label>` : ''}
@@ -695,6 +906,39 @@ export function renderApp() {
                       </select>
                     </label>
                   </div>` : ''}` : ''}
+              ${V.isLoanKind ? `
+                <div style="height:1px;background:${TH.border};margin:4px 0"></div>
+                <span style="font-size:12px;font-weight:600;color:${GREY};text-transform:uppercase;letter-spacing:0.06em">Loan schedule</span>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Pay from
+                  <select data-change="${H(e => { set('loanFrom', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${V.loanFromOptions.map(o => `<option value="${o.v}" ${o.v === V.formLoanFrom ? 'selected' : ''}>${o.l}</option>`).join('')}
+                  </select>
+                </label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Annual interest rate %
+                    <input id="f-loan-rate" value="${esc(V.formLoanRate)}" placeholder="3,5" inputmode="decimal" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+                  </label>
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Remaining term (months)
+                    <input id="f-loan-term" value="${esc(V.formLoanTermMonths)}" placeholder="84" inputmode="numeric" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;font-variant-numeric:tabular-nums;outline:none">
+                  </label>
+                </div>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Interest category
+                  <select data-change="${H(e => { set('loanCategory', +e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                    ${V.loanCategoryOptions.map(o => `<option value="${o.v}" ${o.v === V.formLoanCategory ? 'selected' : ''}>${o.l}</option>`).join('')}
+                  </select>
+                </label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Day of the month
+                    <select data-change="${H(e => { set('loanDay', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                      ${V.autopayDayOptions.map(o => `<option value="${o.v}" ${o.v === V.formLoanDay ? 'selected' : ''}>${o.l}</option>`).join('')}
+                    </select>
+                  </label>
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">If it lands on a weekend
+                    <select data-change="${H(e => { set('loanWeekendRule', e.target.value); render(); })}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                      ${V.weekendRuleOptions.map(o => `<option value="${o.v}" ${o.v === V.formLoanWeekendRule ? 'selected' : ''}>${o.l}</option>`).join('')}
+                    </select>
+                  </label>
+                </div>` : ''}
               ${V.showIban ? `
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">IBAN (optional)
                   <input id="f-iban" value="${esc(V.formIban)}" placeholder="NL91 ABNA 0417 1643 00" autocapitalize="characters" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
@@ -822,10 +1066,10 @@ export function renderApp() {
                 </label>` : ''}
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Starts
-                  <input type="date" data-change="${H(e => { set('startDate', e.target.value); render(); })}" value="${V.formStartDate}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+                  <input type="date" data-change="${H(e => { set('startDate', e.target.value); render(); })}" value="${V.formStartDate}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none;color-scheme:${state.themeMode}">
                 </label>
                 <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY};${V.formNoEnd ? 'opacity:0.5' : ''}">Ends
-                  <input type="date" data-change="${H(e => { set('endDate', e.target.value); render(); })}" value="${V.formEndDate}" ${V.formNoEnd ? 'disabled' : ''} style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+                  <input type="date" data-change="${H(e => { set('endDate', e.target.value); render(); })}" value="${V.formEndDate}" ${V.formNoEnd ? 'disabled' : ''} style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none;color-scheme:${state.themeMode}">
                 </label>
               </div>
               <label style="display:flex;align-items:center;gap:9px;cursor:pointer">
@@ -861,13 +1105,13 @@ export function renderApp() {
             </div>
             <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em;padding:2px 2px 0">Data</span>
             <div style="display:flex;flex-direction:column;gap:2px;background:${TH.surface};border-radius:14px;overflow:hidden">
-              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+              <button data-click="${H(() => openModal('data'))}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
                 <svg width="20" height="20" style="color:${GREY}"><use href="#ic-db"></use></svg>Data
               </button>
-              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+              <button data-click="${H(() => openModal('backups'))}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
                 <svg width="20" height="20" style="color:${GREY}"><use href="#ic-refresh"></use></svg>Backups
               </button>
-              <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+              <button data-click="${H(() => openAboutModal())}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
                 <svg width="20" height="20" style="color:${GREY}"><use href="#ic-info"></use></svg>About
               </button>
             </div>
@@ -906,6 +1150,86 @@ export function renderApp() {
               </label>
               ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
               <button data-click="${H(() => deleteAllDataAction())}" style="border:0;background:${RED};color:#fff;border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Permanently delete everything</button>
+            </div>` : ''}
+
+          ${V.isDataModal ? `
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <p style="margin:0;font-size:13.5px;color:${GREY};line-height:1.5">Download your full movement ledger as a spreadsheet-friendly CSV file — every expense, income, and transfer, with account and category names resolved.</p>
+              <button data-click="${H(() => downloadTransactionsCsv())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                <svg width="18" height="18"><use href="#ic-download"></use></svg>Download movements (.csv)
+              </button>
+            </div>` : ''}
+
+          ${V.isBackupsModal ? `
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <span style="font-weight:700;font-size:15px">Export a backup</span>
+                <p style="margin:0;font-size:13.5px;color:${GREY};line-height:1.5">Downloads everything — accounts, categories, movements, budgets, and recurring rules — as one JSON file. Keep it somewhere safe.</p>
+                <button data-click="${H(() => downloadBackup())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                  <svg width="18" height="18"><use href="#ic-download"></use></svg>Download backup (.json)
+                </button>
+              </div>
+              <div style="height:1px;background:${TH.border}"></div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <span style="font-weight:700;font-size:15px;color:${RED}">Restore from a backup</span>
+                <p style="margin:0;font-size:13.5px;color:${GREY};line-height:1.5">This replaces everything currently in the app with the contents of the backup file. This cannot be undone.</p>
+                <input type="file" accept="application/json" id="f-backup-file" data-change="${H(e => pickBackupFile(e.target.files[0]))}" style="display:none">
+                <label for="f-backup-file" style="border:1px solid ${TH.border};background:${TH.surface};color:${TH.text};border-radius:12px;padding:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:9px">
+                  <svg width="18" height="18"><use href="#ic-upload"></use></svg>${V.formBackupFileName ? 'Selected: ' + esc(V.formBackupFileName) : 'Choose backup file…'}
+                </label>
+                ${V.formBackupFileName ? `
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Password
+                    <input id="f-backup-password" type="password" value="${esc(V.formBackupPassword)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+                  </label>
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Type RESTORE to confirm
+                    <input id="f-backup-confirm" value="${esc(V.formBackupConfirm)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
+                  </label>
+                  ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
+                  <button data-click="${H(() => restoreBackupAction())}" style="border:0;background:${RED};color:#fff;border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Restore — replace everything</button>
+                ` : ''}
+              </div>
+            </div>` : ''}
+
+          ${V.isConnectBankModal ? `
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <p style="margin:0;font-size:13.5px;color:${GREY};line-height:1.5">
+                You will be sent to your bank to approve read-only access. Banks grant it for about 90 days, after which you reconnect here.
+              </p>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Country
+                <select data-change="${H(V.onAspspCountry)}" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};cursor:pointer;font-size:15px">
+                  ${V.aspspCountryOptions.map(o => `<option value="${o[0]}" ${o[0] === V.aspspCountry ? 'selected' : ''}>${o[1]}</option>`).join('')}
+                </select>
+              </label>
+              ${V.formError ? `<div style="font-size:13px;color:${RED}">${esc(V.formError)}</div>` : ''}
+              ${V.aspspLoading
+                ? `<div style="padding:20px;text-align:center;color:${GREY};font-size:13.5px">Loading banks…</div>`
+                : V.aspspList.length
+                  ? `<div style="display:flex;flex-direction:column;max-height:44vh;overflow:auto">
+                      ${V.aspspList.map(b => `
+                        <button data-click="${H(b.onClick)}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:12px 4px;cursor:pointer;font-size:14.5px">${esc(b.name)}</button>`).join('')}
+                    </div>`
+                  : `<div style="padding:20px;text-align:center;color:${GREY};font-size:13.5px">No banks listed for this country.</div>`}
+            </div>` : ''}
+
+          ${V.isAboutModal ? `
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px 0">
+                <span style="width:56px;height:56px;border-radius:18px;background:#ffd43b;display:grid;place-items:center;overflow:hidden"><img src="cat-logo.png" alt="" style="width:74%;height:74%;object-fit:contain"></span>
+                <span style="font-weight:700;font-size:17px">MerlitoMoney</span>
+                <span style="font-size:13px;color:${GREY}">Version ${esc(V.appVersion)}</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;background:${TH.surface};border-radius:14px;padding:14px 16px">
+                <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em">Offline support</span>
+                ${V.swInfo ? `
+                  <span style="font-size:13.5px">${V.swInfo.registered
+                    ? `Service worker active — ${esc(V.swInfo.state)}${V.swInfo.updateAvailable ? ' (update waiting — reload to apply)' : ''}`
+                    : (V.swInfo.supported ? 'No service worker registered yet' : 'Not supported in this browser')}</span>
+                ` : `<span style="font-size:13.5px;color:${GREY}">Checking…</span>`}
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em">Open source</span>
+                <p style="margin:0;font-size:13px;color:${GREY};line-height:1.6">MerlitoMoney is a self-hosted, single-user budgeting app. It's built with FastAPI, Starlette, Uvicorn and Pydantic (Python) and vanilla JavaScript with no frontend build step — all MIT/BSD-licensed open source. No analytics, no external services, no accounts beyond your own.</p>
+              </div>
             </div>` : ''}
         </div>
       </div>

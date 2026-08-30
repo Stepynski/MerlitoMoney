@@ -1,16 +1,53 @@
 import { state } from './state.js';
 import { TH, ACCENT, GREY } from './theme-runtime.js';
-import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS } from './constants.js';
+import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS, APP_VERSION, localDateStr } from './constants.js';
 import { render } from './render.js';
-import { reopenAccount } from './actions.js';
+import {
+  reopenAccount, toggleNetWorthAction, openAboutModal,
+  decideStaged, setStagedField, mapFeedAction, toggleFeedSyncAction,
+  connectBankAction, loadAspsps
+} from './actions.js';
 
 // ---------- helpers ported from the design ----------
+// Single source of truth for the number-format preference (comma-decimal
+// "de-DE" vs point-decimal "en-US") so money()/num()/short() and every
+// other locale-aware formatter stay coherent with one setting.
+export function locale() { return state.numberFormat === 'point' ? 'en-US' : 'de-DE'; }
 export function money(v, plus) {
-  const s = Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return (v < 0 ? '-' : plus && v > 0 ? '+' : '') + s + ' €';
+  const s = Math.abs(v).toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // A tiny negative float — floating-point rounding noise from summing many
+  // amounts — rounds to "0.00" at this precision, but v < 0 alone would
+  // still sign it, showing a nonsensical "-0,00 €". Only sign a value that
+  // actually rounds to something nonzero at the precision being displayed.
+  const nonZero = Math.round(Math.abs(v) * 100) !== 0;
+  return (v < 0 && nonZero ? '-' : plus && v > 0 && nonZero ? '+' : '') + s + ' €';
 }
-export function short(v) { return Math.round(v).toLocaleString('de-DE') + ' €'; }
-export function num(v) { return parseFloat(String(v).replace(/\./g, '').replace(',', '.')) || 0; }
+export function short(v) { return Math.round(v).toLocaleString(locale()) + ' €'; }
+export function num(v) {
+  const s = String(v);
+  // 'point' mode: '.' is the decimal separator, ',' is the thousands
+  // separator (en-US convention) — the opposite of the default 'comma'
+  // mode (de-DE convention), where '.' is stripped as thousands and ','
+  // becomes the decimal point.
+  if (state.numberFormat === 'point') return parseFloat(s.replace(/,/g, '')) || 0;
+  // In comma mode a single '.' followed by only 1-2 trailing digits ("10.5",
+  // "10.50") can only be a decimal point typed out of point-locale habit —
+  // a genuine thousands separator always groups exactly 3 digits ("1.234",
+  // "12.345,67"). Stripping it as a thousands separator here used to turn
+  // "10.5" into 105 and "50.00" into 5000: a silent 10x-100x error with no
+  // warning. This shape is unambiguous, so it's read as the decimal it can
+  // only be; anything else falls through to the normal comma-decimal rule.
+  if (!s.includes(',') && /^-?\d*\.\d{1,2}$/.test(s.trim())) return parseFloat(s) || 0;
+  return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
+}
+// Formats a raw number for pre-filling an *editable* form field, in
+// exactly the format num() will parse back — money() already does this
+// correctly (that's why editRecurring/editMovement already round-trip
+// through it); this just saves repeating the "strip the currency
+// suffix" boilerplate at every call site, including non-currency values
+// like a percentage rate, since only the decimal/thousands convention
+// matters here, not the € sign.
+export function numStr(v) { return money(v).replace(' €', '').trim(); }
 export function dm(d) { return String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear(); }
 export function cat(id) { return state.cats.find(c => c.id === id); }
 export function acct(id) { return state.accounts.find(a => a.id === id); }
@@ -36,7 +73,17 @@ export function shiftedAnchor(dir) {
   return a;
 }
 export function shiftPeriod(dir) { state.anchor = shiftedAnchor(dir); }
-export function months() { const p = period(); return Math.max(1, Math.round((p.end - p.start) / 86400000 / 30.4)); }
+export function months() {
+  // Month/quarter/year periods round to a whole number of months by
+  // construction (28-31, ~90, ~365 days), so the floor of 1 is only ever a
+  // defensive minimum there. A week is genuinely a fraction of a month —
+  // flooring it to 1 was comparing a week of spending against a FULL
+  // month's limit, letting a budget look untouched for the first three
+  // weeks of every month no matter how much was actually spent.
+  if (state.mode === 'week') return 7 / 30.4;
+  const p = period();
+  return Math.max(1, Math.round((p.end - p.start) / 86400000 / 30.4));
+}
 export function scoped() { const p = period(); return state.tx.filter(t => t._date >= p.start && t._date <= p.end); }
 export function totals() {
   const rows = scoped(), byCat = {}, counts = {};
@@ -48,9 +95,35 @@ export function totals() {
   });
   return { rows, byCat, counts, exp, inc };
 }
+// Reconstructs total net worth (net-worth-included accounts only) as of
+// just before cutoffExclusive, by walking every transaction dated on or
+// after that point backward out of each account's current balance. This is
+// the only correct way to get a past balance: the server only reports each
+// account's balance *today*, so a historical figure has to be derived, not
+// read off a field. Handles transfers on both sides (source and
+// destination) and treats 'Transfer external' as leaving the tracked
+// accounts entirely, same as the account balance itself already does.
+export function netWorthAt(cutoffExclusive) {
+  const s = state;
+  let result = 0;
+  s.accounts.filter(a => a.include_in_net_worth).forEach(a => {
+    let bal = a.balance;
+    s.tx.forEach(t => {
+      if (t._date < cutoffExclusive) return;
+      if (t.account_id === a.id) {
+        if (t.type === 'Expense') bal += t.amount;
+        else if (t.type === 'Income') bal -= t.amount;
+        else if (t.type === 'Transfer internal' || t.type === 'Transfer external') bal += t.amount;
+      }
+      if (t.type === 'Transfer internal' && t.to_account_id === a.id) bal -= t.amount;
+    });
+    result += bal;
+  });
+  return result;
+}
 export function unbudgeted() { return state.cats.filter(c => c.kind === 'expense' && state.budgets[c.id] === undefined); }
 export function monthlyEquivalent(r) {
-  if (r.amount_mode === 'full_balance') return 0; // future charges unknown, can't project
+  if (r.amount_mode === 'full_balance' || r.amount_mode === 'amortized') return 0; // future amount isn't a fixed number, can't project
   const n = r.interval_n || 1;
   if (r.freq === 'daily') return r.amount * 30.44 / n;
   if (r.freq === 'weekly') return r.amount * 4.348 / n;
@@ -58,6 +131,10 @@ export function monthlyEquivalent(r) {
   return r.amount / n; // monthly, monthly_nth_business_day
 }
 export function describeFrequency(r) {
+  if (r.amount_mode === 'amortized') {
+    const rate = ((r.annual_rate || 0) * 100).toLocaleString(locale(), { maximumFractionDigits: 2 });
+    return `Amortized loan payment on the ${r.day_of_month}${r.day_of_month === 1 ? 'st' : r.day_of_month === 2 ? 'nd' : r.day_of_month === 3 ? 'rd' : 'th'} · ${rate}% fixed rate`;
+  }
   const WD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const ord = n => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
   const every = r.interval_n > 1 ? `Every ${r.interval_n} ` : null;
@@ -77,15 +154,30 @@ export function describeFrequency(r) {
 }
 export function netWorthHistory(monthsBack) {
   const s = state;
+  // Account-aware: a transaction's effect on the *counted* total depends
+  // on which side(s) of it touch an included account, not just its type.
+  // A transfer between two included accounts still nets to zero (money
+  // just moved within what you're counting); a transfer touching only
+  // one included side must move the total, not cancel out — e.g. paying
+  // down an excluded loan from an included checking account should
+  // reduce counted net worth by that amount.
+  const included = new Set(s.accounts.filter(a => a.include_in_net_worth).map(a => a.id));
   const sorted = s.tx.slice().sort((a, b) => a._date - b._date);
   const now = new Date();
-  let idx = 0, running = s.accounts.reduce((a, acc) => a + acc.starting_balance, 0);
+  let idx = 0, running = s.accounts.reduce((a, acc) => a + (included.has(acc.id) ? acc.starting_balance : 0), 0);
   const points = [];
   for (let i = monthsBack - 1; i >= 0; i--) {
     const boundary = i === 0 ? now : new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
     while (idx < sorted.length && sorted[idx]._date <= boundary) {
       const t = sorted[idx];
-      running += t.type === 'Income' ? t.amount : t.type === 'Transfer internal' ? 0 : -t.amount;
+      if (t.type === 'Income') {
+        if (included.has(t.account_id)) running += t.amount;
+      } else if (t.type === 'Transfer internal') {
+        if (included.has(t.account_id)) running -= t.amount;
+        if (t.to_account_id && included.has(t.to_account_id)) running += t.amount;
+      } else { // Expense, Transfer external
+        if (included.has(t.account_id)) running -= t.amount;
+      }
       idx++;
     }
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -99,13 +191,21 @@ export function toggle(key, id) {
 }
 export function openModal(kind, editId, form) {
   state.modal = kind; state.editId = editId || null; state.drawerOpen = false; state.formError = '';
+  const defaultAccount = state.accounts[0] ? state.accounts[0].id : '';
+  const defaultToAccount = (state.accounts.find(a => a.active && a.id !== defaultAccount) || {}).id || '';
   state.form = Object.assign({
-    name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '',
-    icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '',
+    name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: defaultAccount, toAccount: defaultToAccount,
+    icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '', date: localDateStr(),
     recurMovement: 'Expense', freq: 'monthly', intervalN: '1', weekday: '0', dayOfMonth: '1', monthOfYear: '1',
-    nthBusinessDay: '-1', weekendRule: 'none', startDate: new Date().toISOString().slice(0, 10), endDate: '', noEnd: true,
+    nthBusinessDay: '-1', weekendRule: 'none', startDate: localDateStr(), endDate: '', noEnd: true,
     dangerPassword: '', dangerConfirm: '', currentPassword: '', newPassword: '', confirmNewPassword: '',
-    autopayEnabled: false, autopayFrom: '', autopayDay: '1', autopayWeekendRule: 'none'
+    autopayEnabled: false, autopayFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '', autopayDay: '1', autopayWeekendRule: 'none',
+    loanFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '', loanRate: '', loanTermMonths: '',
+    loanCategory: (state.cats.find(c => c.name === 'Loan Interest') || state.cats.find(c => c.kind === 'expense') || {}).id || '',
+    loanDay: '1', loanWeekendRule: 'none',
+    extraPaymentAmount: '', extraPaymentDate: localDateStr(), extraPaymentRuleId: '',
+    extraPaymentFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '',
+    backupFileData: null, backupFileName: '', backupPassword: '', backupConfirm: ''
   }, form || {});
   render();
 }
@@ -114,17 +214,35 @@ export function openModal(kind, editId, form) {
 export function computeView() {
   const s = state, P = period(), T = totals(), M = months();
   const spendable = s.accounts.filter(a => a.grp === 'spend').reduce((x, a) => x + a.balance, 0);
-  const total = s.accounts.reduce((x, a) => x + a.balance, 0);
+  const total = s.accounts.filter(a => a.include_in_net_worth).reduce((x, a) => x + a.balance, 0);
+  // Used only for the "Savings" cell below (total - spendable), which needs
+  // both sides on the same net-worth-inclusion basis. `spendable` above
+  // deliberately isn't: it's a cash-flow figure ("what I can spend right
+  // now"), so it stays as every spend account regardless of the net-worth
+  // toggle. Reusing it for Savings mixed the two bases — a spend account
+  // excluded from net worth appeared in spendable but never in total,
+  // silently pulling Savings down; a credit/loan account included in net
+  // worth appeared in total but was never in spendable to begin with.
+  const spendableInNetWorth = s.accounts.filter(a => a.grp === 'spend' && a.include_in_net_worth).reduce((x, a) => x + a.balance, 0);
   const saldo = T.inc - T.exp;
   const expView = s.view === 'expenses';
 
-  const nav = [['overview', 'Overview', 'ic-bars'], ['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['budget', 'Budget', 'ic-gauge']];
+  const nav = [['overview', 'Overview', 'ic-bars'], ['accounts', 'Accounts', 'ic-coins'], ['categories', 'Categories', 'ic-donut'], ['balance', 'Movements', 'ic-receipt'], ['budget', 'Budget', 'ic-gauge'], ['import', 'Import', 'ic-download']];
 
   let cells;
-  if (s.page === 'accounts') {
+  if (s.page === 'import') {
+    const undecided = s.staged.filter(r => r.decision === 'pending').length;
+    const ready = s.staged.filter(r => r.decision === 'import' || r.decision === 'link').length;
+    const flagged = s.staged.filter(r => r.decision === 'pending' && r.match_tx_id).length;
+    cells = [
+      { label: 'To review', value: String(undecided), color: TH.text },
+      { label: 'Possible duplicates', value: String(flagged), color: flagged ? RED : GREY },
+      { label: 'Ready', value: String(ready), color: ready ? GREEN : TH.text }
+    ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
+  } else if (s.page === 'accounts') {
     cells = [
       { label: 'Spendable', value: money(spendable), color: TH.text },
-      { label: 'Savings', value: money(total - spendable), color: GREEN },
+      { label: 'Savings', value: money(total - spendableInNetWorth), color: GREEN },
       { label: 'Net worth', value: money(total), color: TH.text }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else if (s.page === 'balance' && s.balanceTab === 'recurring') {
@@ -137,11 +255,32 @@ export function computeView() {
       { label: 'Recurring income', value: money(monthlyInc), color: GREEN }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else if (s.page === 'balance') {
-    const net = T.rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0);
+    // Reconstructed, not read off T.rows — T.rows is Expense/Income only and
+    // scoped to whatever accounts happen to have activity, which ignores
+    // transfers, net-worth-excluded accounts, and (for any period but the
+    // current one) everything that happened between the period and today.
+    // Deriving both ends from the same account-balance walk means Start,
+    // Change and End always reconcile by construction.
+    const dayAfterEnd = new Date(P.end); dayAfterEnd.setDate(dayAfterEnd.getDate() + 1);
+    const startBal = netWorthAt(P.start);
+    const endBal = netWorthAt(dayAfterEnd);
+    const net = endBal - startBal;
     cells = [
-      { label: 'Start balance', value: money(total - net), color: GREY },
+      { label: 'Start balance', value: money(startBal), color: GREY },
       { label: 'Change', value: money(net, true), color: net < 0 ? RED : GREEN },
-      { label: 'End balance', value: money(total), color: TH.text }
+      { label: 'End balance', value: money(endBal), color: TH.text }
+    ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
+  } else if (s.page === 'overview') {
+    // Overview has no time-window selector (a snapshot dashboard, not a
+    // scoped report) — these three are plain, non-interactive, all-time
+    // figures rather than the period-scoped, clickable view-switcher used
+    // on Categories/Budget.
+    const allExp = s.tx.reduce((a, t) => a + (t.type === 'Expense' ? t.amount : 0), 0);
+    const allInc = s.tx.reduce((a, t) => a + (t.type === 'Income' ? t.amount : 0), 0);
+    cells = [
+      { label: 'Expenses', value: money(allExp), color: RED },
+      { label: 'Balance', value: money(total), color: TH.text },
+      { label: 'Income', value: money(allInc), color: GREEN }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else {
     const sel = k => s.view === k;
@@ -158,18 +297,39 @@ export function computeView() {
 
   const editAccount = a => openModal('account', a.id, {
     name: a.name, type: a.type,
-    balance: a.grp === 'credit' ? String(Math.abs(a.starting_balance)) : String(a.starting_balance),
-    goal: a.goal_amount ? String(a.goal_amount) : '', kind: a.grp, iban: a.iban || '',
+    // Pre-filled with today's actual debt (a.balance), matching the field's
+    // "Current amount/balance owed" label — not the creation-time
+    // starting_balance, which is a different number entirely once any
+    // payment has been made. submitModal() solves starting_balance back out
+    // of whatever is entered here, so leaving this untouched round-trips to
+    // the same starting_balance it started with.
+    balance: (a.grp === 'credit' || a.grp === 'loan') ? numStr(Math.abs(a.balance)) : numStr(a.starting_balance),
+    goal: a.goal_amount ? numStr(a.goal_amount) : '', kind: a.grp, iban: a.iban || '',
     autopayEnabled: !!(a.autopay && a.autopay.enabled),
     autopayFrom: a.autopay && a.autopay.from_account_id ? a.autopay.from_account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || ''),
     autopayDay: a.autopay ? String(a.autopay.day_of_month) : '1',
-    autopayWeekendRule: a.autopay ? a.autopay.weekend_rule : 'none'
+    autopayWeekendRule: a.autopay ? a.autopay.weekend_rule : 'none',
+    loanFrom: a.loan && a.loan.from_account_id ? a.loan.from_account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || ''),
+    loanRate: a.loan ? numStr((a.loan.annual_rate || 0) * 100) : '',
+    loanTermMonths: a.loan ? String(a.loan.term_months_remaining) : '',
+    loanCategory: a.loan && a.loan.category_id ? a.loan.category_id : ((s.cats.find(c => c.name === 'Loan Interest') || s.cats.find(c => c.kind === 'expense') || {}).id || ''),
+    loanDay: a.loan ? String(a.loan.day_of_month) : '1',
+    loanWeekendRule: a.loan ? a.loan.weekend_rule : 'none'
   });
+  const addExtraPayment = a => {
+    const rule = s.recurring.find(r => r.to_account_id === a.id && r.amount_mode === 'amortized');
+    openModal('extraPayment', a.id, {
+      extraPaymentAmount: '', extraPaymentDate: localDateStr(),
+      extraPaymentRuleId: rule ? rule.id : '',
+      extraPaymentFrom: rule ? rule.account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || '')
+    });
+  };
   const accountGroups = [
-    { key: 'spend', title: 'Accounts' }, { key: 'save', title: 'Savings accounts' }, { key: 'credit', title: 'Credit cards' }
+    { key: 'spend', title: 'Accounts' }, { key: 'save', title: 'Savings accounts' },
+    { key: 'credit', title: 'Credit cards' }, { key: 'loan', title: 'Loans' }
   ].map(g => {
     const items = s.accounts.filter(a => a.grp === g.key && a.active);
-    const isCredit = g.key === 'credit';
+    const isCredit = g.key === 'credit', isLoan = g.key === 'loan';
     const groupSum = items.reduce((x, a) => x + a.balance, 0);
     return {
       title: g.title, total: money(groupSum), totalColor: groupSum < 0 ? RED : GREEN,
@@ -177,23 +337,34 @@ export function computeView() {
         const own = s.tx.filter(t => t.account_id === a.id);
         const owed = isCredit ? Math.max(0, -a.balance) : 0;
         const utilPct = isCredit && a.goal_amount ? Math.min(100, owed / a.goal_amount * 100) : 0;
+        const paidOff = isLoan && a.goal_amount ? Math.min(100, Math.max(0, (a.goal_amount + a.balance) / a.goal_amount * 100)) : 0;
         return {
-          name: a.name, type: a.type, icon: '#' + a.icon, color: a.color, balance: money(a.balance),
+          id: a.id, name: a.name, type: a.type, icon: '#' + a.icon, color: a.color, balance: money(a.balance),
           balanceColor: a.balance < 0 ? RED : GREEN,
-          hasGoal: !isCredit && !!a.goal_amount,
-          goalPct: !isCredit && a.goal_amount ? Math.min(100, a.balance / a.goal_amount * 100) + '%' : '0%',
-          goalLabel: !isCredit && a.goal_amount ? Math.round(a.balance / a.goal_amount * 100) + '% of ' + short(a.goal_amount) : '',
+          hasGoal: !isCredit && !isLoan && !!a.goal_amount,
+          goalPct: !isCredit && !isLoan && a.goal_amount ? Math.min(100, a.balance / a.goal_amount * 100) + '%' : '0%',
+          goalLabel: !isCredit && !isLoan && a.goal_amount ? Math.round(a.balance / a.goal_amount * 100) + '% of ' + short(a.goal_amount) : '',
           hasUtil: isCredit && !!a.goal_amount,
           utilPct: utilPct + '%',
           utilColor: utilPct > 70 ? RED : utilPct > 30 ? '#e8890c' : '#40c057',
           utilLabel: isCredit && a.goal_amount ? Math.round(utilPct) + '% of ' + short(a.goal_amount) + ' limit' : '',
+          hasPayoff: isLoan && !!a.goal_amount,
+          payoffPct: paidOff + '%',
+          payoffLabel: isLoan && a.goal_amount ? Math.round(paidOff) + '% paid off of ' + short(a.goal_amount) : '',
           autopayLabel: !isCredit ? '' : (a.autopay && a.autopay.enabled
             ? 'Autopay ' + (a.autopay.next_date ? 'on ' + dm(new Date(a.autopay.next_date + 'T00:00:00')) : 'scheduled')
             : 'Autopay off'),
+          loanLabel: !isLoan ? '' : (a.loan
+            ? (a.loan.paid_off ? 'Paid off' : 'Next payment ' + (a.loan.next_date ? dm(new Date(a.loan.next_date + 'T00:00:00')) : '—') + ' · ' + a.loan.term_months_remaining + ' left')
+            : 'No schedule set'),
+          isLoan,
+          includedInNetWorth: !!a.include_in_net_worth,
           meta: own.length ? own.length + ' mov.' : 'new',
           onClick: () => { s.page = 'balance'; s.balanceTab = 'movements'; s.fAccounts = [a.id]; s.filtersOpen = true; render(); },
           onEdit: () => editAccount(a),
-          onDelete: () => openModal('deleteAccount', a.id)
+          onDelete: () => openModal('deleteAccount', a.id),
+          onExtraPayment: () => addExtraPayment(a),
+          onToggleNetWorth: () => toggleNetWorthAction(a)
         };
       })
     };
@@ -206,7 +377,7 @@ export function computeView() {
 
   const editMovement = t => openModal('movement', t.id, {
     movement: t.type, category: t.category_id || '', amount: money(t.amount).replace(' €', '').trim(),
-    account: t.account_id, toAccount: t.to_account_id || '', note: t.note || ''
+    account: t.account_id, toAccount: t.to_account_id || '', note: t.note || '', date: t.date
   });
   const editRecurring = r => openModal('recurring', r.id, {
     name: r.name, recurMovement: r.type, account: r.account_id, toAccount: r.to_account_id || '',
@@ -219,12 +390,13 @@ export function computeView() {
   const recurringRows = s.recurring.map(r => {
     const c = cat(r.category_id), a = acct(r.account_id), toA = acct(r.to_account_id);
     const isFullBalance = r.amount_mode === 'full_balance';
+    const isAmortized = r.amount_mode === 'amortized';
     return {
       id: r.id, name: r.name, active: !!r.active,
-      icon: '#' + (isFullBalance ? 'ic-card' : c ? c.icon : (r.type === 'Income' ? 'ic-salary' : 'ic-refresh')),
-      color: isFullBalance ? (toA ? toA.color : GREY) : c ? c.color : (r.type === 'Income' ? GREEN : GREY),
-      amount: isFullBalance ? 'Full balance' : money(r.type === 'Expense' ? -r.amount : r.amount, r.type === 'Income'),
-      amountColor: isFullBalance ? GREY : r.type === 'Expense' ? RED : r.type === 'Income' ? GREEN : GREY,
+      icon: '#' + (isFullBalance ? 'ic-card' : isAmortized ? 'ic-bank' : c ? c.icon : (r.type === 'Income' ? 'ic-salary' : 'ic-refresh')),
+      color: (isFullBalance || isAmortized) ? (toA ? toA.color : GREY) : c ? c.color : (r.type === 'Income' ? GREEN : GREY),
+      amount: isFullBalance ? 'Full balance' : isAmortized ? 'Interest + principal' : money(r.type === 'Expense' ? -r.amount : r.amount, r.type === 'Income'),
+      amountColor: (isFullBalance || isAmortized) ? GREY : r.type === 'Expense' ? RED : r.type === 'Income' ? GREEN : GREY,
       account: a ? a.name : '—',
       freqLabel: describeFrequency(r),
       nextLabel: !r.active ? 'Paused' : (r.next_date ? 'Next: ' + dm(new Date(r.next_date + 'T00:00:00')) : 'Finished'),
@@ -240,6 +412,19 @@ export function computeView() {
   const donutBase = s.view === 'income' ? T.inc : T.exp;
   const donutCats = s.cats.filter(c => c.kind === (s.view === 'income' ? 'income' : 'expense'))
     .map(c => ({ c, v: T.byCat[c.id] || 0 })).filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+  // A row with no category (possible via bank import) counts toward
+  // donutBase but has no matching entry above — the gap used to be
+  // invisible: conic-gradient extends the final stop's color to fill
+  // anything short of 100%, so the last real category silently absorbed it
+  // and every legend percentage read low. Giving it its own grey slice
+  // keeps the gradient and the legend numbers honest, and surfaces exactly
+  // what needs categorizing.
+  const categorizedSum = donutCats.reduce((a, x) => a + x.v, 0);
+  const uncategorized = donutBase - categorizedSum;
+  if (uncategorized > 0.005) {
+    donutCats.push({ c: { name: 'Uncategorized', color: GREY, icon: 'ic-dots' }, v: uncategorized });
+    donutCats.sort((a, b) => b.v - a.v); // so a large uncategorized slice isn't crowded out of the top-6 legend
+  }
   let accSum = 0;
   const stops = donutCats.map(x => {
     const from = accSum / (donutBase || 1) * 100; accSum += x.v;
@@ -325,7 +510,7 @@ export function computeView() {
   const rawPeak = Math.max(1, ...buckets.map(b => b.total));
   const step = Math.pow(10, Math.floor(Math.log10(rawPeak)));
   const peak = Math.ceil(rawPeak / (step / 2)) * (step / 2);
-  const axis = [4, 3, 2, 1, 0].map(i => Math.round(peak * i / 4).toLocaleString('de-DE'));
+  const axis = [4, 3, 2, 1, 0].map(i => Math.round(peak * i / 4).toLocaleString(locale()));
   const bars = buckets.map(b => ({
     label: b.label, height: Math.max(0.5, b.total / peak * 100) + '%', tip: b.full + ' · ' + money(b.total),
     segments: Object.keys(b.byCat).sort((x, y) => b.byCat[y] - b.byCat[x]).map(id => {
@@ -334,6 +519,7 @@ export function computeView() {
     })
   }));
   const spanDays = Math.max(1, Math.round((Math.min(P.end, new Date()) - P.start) / 86400000) + 1);
+  const spendChartTitle = (expView ? 'Expenses' : 'Income') + ' · ' + P.title;
 
   const bIds = Object.keys(s.budgets).map(Number).filter(id => cat(id));
   const budgetRows = bIds.map(id => {
@@ -343,7 +529,7 @@ export function computeView() {
       name: c.name, color: c.color, icon: '#' + c.icon, spent: money(sp), limit: money(lim),
       pct: Math.round(pct) + '%', width: Math.min(100, pct) + '%', barColor: col,
       left: pct > 100 ? money(sp - lim) + ' over' : money(lim - sp) + ' left',
-      onClick: () => openModal('budget', id, { category: id, limit: String(s.budgets[id]) })
+      onClick: () => openModal('budget', id, { category: id, limit: numStr(s.budgets[id]) })
     };
   }).sort((a, b) => parseFloat(b.pct) - parseFloat(a.pct));
   const gLim = bIds.reduce((a, id) => a + s.budgets[id] * M, 0);
@@ -369,6 +555,143 @@ export function computeView() {
     path: nwPath, area: nwPath + ` L100,${nwH} L0,${nwH} Z`,
     labels: nwPoints.map(p => p.label)
   };
+  // ---- loan payoff projection (Overview widget) ----
+  // Historical portion is built from real transactions — a loan's balance
+  // only ever changes on a transaction date (there's no daily accrual
+  // modeled), so it's genuinely a step function: flat between payments,
+  // then a discrete drop on each scheduled payment AND on any manual
+  // prepayment (a plain Transfer internal into the loan account, piggy
+  // button or not — same mechanism). Plotting real transaction dates
+  // instead of a smooth curve is what makes a prepayment show up as an
+  // actual step, without touching any earlier point on the line. The
+  // future portion (from today to the loan's scheduled end date) is a
+  // projection using the same amortization formula as
+  // backend/recurring.py's _amortized_payment — an estimate, not
+  // authoritative ledger data, so it doesn't need to match generate_due()'s
+  // future rounding to the cent.
+  const amortizedPaymentJs = (principal, monthlyRate, n) => {
+    if (n <= 0) return principal;
+    if (monthlyRate === 0) return principal / n;
+    const factor = Math.pow(1 + monthlyRate, n);
+    return principal * monthlyRate * factor / (factor - 1);
+  };
+  const stepValueAt = (points, t, key) => {
+    let val = points[0][key];
+    for (const p of points) {
+      if (+p.date > t) break;
+      val = p[key];
+    }
+    return val;
+  };
+  const activeLoans = s.accounts.filter(a => a.grp === 'loan' && a.active && a.loan && a.loan.annual_rate != null && a.loan.start_date && a.loan.end_date);
+  let loanPayoffTrend = null;
+  if (activeLoans.length) {
+    const today = new Date();
+    const loanSeries = activeLoans.map(a => {
+      const start = new Date(a.loan.start_date + 'T00:00:00');
+      const end = new Date(a.loan.end_date + 'T00:00:00');
+      const monthlyRate = (a.loan.annual_rate || 0) / 12;
+      const interestByDate = {};
+      if (a.loan.rule_id) {
+        s.tx.filter(t => t.recurring_id === a.loan.rule_id && t.type === 'Expense')
+          .forEach(t => { interestByDate[t.date] = (interestByDate[t.date] || 0) + t.amount; });
+      }
+      let owed = Math.max(0, -a.starting_balance);
+      let interestCum = 0;
+      const points = [{ date: start, owed, interestCum }];
+      s.tx.filter(t => t.to_account_id === a.id && t.type === 'Transfer internal')
+        .slice().sort((x, y) => x._date - y._date)
+        .forEach(t => {
+          owed = Math.max(0, owed - t.amount);
+          interestCum += interestByDate[t.date] || 0;
+          points.push({ date: t._date, owed, interestCum });
+        });
+      // Flat line up to today even if the last real payment was a while ago.
+      points.push({ date: today, owed, interestCum });
+      // Projected future: monthly, recomputing the payment fresh each cycle
+      // from the current balance — exactly what generate_due() will do.
+      if (!a.loan.paid_off && owed > 0.5) {
+        let remaining = a.loan.term_months_remaining, bal = owed;
+        let cursor = a.loan.next_date ? new Date(a.loan.next_date + 'T00:00:00') : new Date(today.getFullYear(), today.getMonth() + 1, today.getDate());
+        while (remaining > 0 && bal > 0.005) {
+          const payment = amortizedPaymentJs(bal, monthlyRate, remaining);
+          const interest = bal * monthlyRate;
+          const principal = Math.min(bal, payment - interest);
+          bal = Math.max(0, bal - principal);
+          interestCum += interest;
+          points.push({ date: new Date(cursor), owed: bal, interestCum });
+          cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, cursor.getDate());
+          remaining--;
+        }
+      }
+      const lastDate = points[points.length - 1].date;
+      return { start, end: lastDate > end ? lastDate : end, points };
+    }).filter(ls => {
+      // A garbage rate/term on one account (e.g. a stray decimal-separator
+      // typo landing an interest rate in the millions of percent) can blow
+      // amortizedPaymentJs() up to Infinity, which turns every later point
+      // in that loan's own series into NaN. Since every active loan shares
+      // one y-scale below, a single contaminated series would otherwise
+      // blank the combined chart for every loan, not just the bad one — so
+      // drop just that account's series here instead.
+      const ok = ls.points.every(p => Number.isFinite(p.owed) && Number.isFinite(p.interestCum));
+      if (!ok) console.warn('[mm debug] excluding a loan account from the payoff projection — its rate/term produced non-finite values', ls);
+      return ok;
+    });
+    if (loanSeries.length) {
+    const overallStart = new Date(Math.min(...loanSeries.map(ls => +ls.start)));
+    const overallEnd = new Date(Math.max(...loanSeries.map(ls => +ls.end), +today));
+    const span = Math.max(1, +overallEnd - +overallStart);
+
+    const dateSet = new Set([+overallStart, +overallEnd, +today]);
+    loanSeries.forEach(ls => ls.points.forEach(p => dateSet.add(+p.date)));
+    const allDates = Array.from(dateSet).sort((a, b) => a - b).map(t => new Date(t));
+    const combined = allDates.map(d => ({
+      date: d,
+      owed: loanSeries.reduce((sum, ls) => sum + stepValueAt(ls.points, +d, 'owed'), 0),
+      interestCum: loanSeries.reduce((sum, ls) => sum + stepValueAt(ls.points, +d, 'interestCum'), 0)
+    }));
+
+    const lpPad = 4, lpH = 34, lpInner = lpH - lpPad * 2;
+    const lpMax = Math.max(1, ...combined.map(p => p.owed), ...combined.map(p => p.interestCum));
+    const xAt = d => (+d - +overallStart) / span * 100;
+    const yAt = v => lpPad + lpInner - (v / lpMax) * lpInner;
+    // Step-after path: hold each value flat until the next point's date,
+    // then drop/rise vertically — a real staircase, not an interpolated line.
+    const stepPath = key => {
+      let d = '';
+      combined.forEach((p, i) => {
+        const x = xAt(p.date), y = yAt(p[key]);
+        if (i === 0) { d += `M${x.toFixed(2)},${y.toFixed(2)}`; return; }
+        d += ` L${x.toFixed(2)},${yAt(combined[i - 1][key]).toFixed(2)} L${x.toFixed(2)},${y.toFixed(2)}`;
+      });
+      return d;
+    };
+    const owedPath = stepPath('owed');
+    const interestPath = stepPath('interestCum');
+
+    let payoffPoint = combined.find(p => p.owed <= 0.5 && p.date >= today);
+    const payoffDate = payoffPoint ? payoffPoint.date : overallEnd;
+    const todayX = xAt(today);
+    const labelCount = 6;
+    const lpLabels = Array.from({ length: labelCount }, (_, k) => {
+      const d = new Date(+overallStart + span * (k / (labelCount - 1)));
+      return M3[d.getMonth()] + " '" + String(d.getFullYear()).slice(2);
+    });
+    const currentOwed = stepValueAt(combined, +today, 'owed');
+    const interestPaidToDate = stepValueAt(combined, +today, 'interestCum');
+    loanPayoffTrend = {
+      current: money(currentOwed),
+      interestPaid: money(interestPaidToDate),
+      payoffLabel: MONTHS[payoffDate.getMonth()] + ' ' + payoffDate.getFullYear(),
+      path: owedPath, area: owedPath + ` L100,${lpH} L0,${lpH} Z`,
+      interestPath,
+      todayX: todayX.toFixed(2),
+      labels: lpLabels
+    };
+    }
+  }
+
   const dashboardAccounts = accountGroups.flatMap(g => g.items);
   const budgetWatch = budgetRows.slice(0, 3).map(b => Object.assign({}, b, { onClick: () => { s.page = 'budget'; render(); } }));
 
@@ -385,7 +708,23 @@ export function computeView() {
   const topIncomeCats = topCatsFor('income', 5);
 
   const prevP = periodFor(shiftedAnchor(-1));
-  const prevExp = s.tx.filter(t => t._date >= prevP.start && t._date <= prevP.end && t.type === 'Expense').reduce((a, t) => a + t.amount, 0);
+  const prevExpFull = s.tx.filter(t => t._date >= prevP.start && t._date <= prevP.end && t.type === 'Expense').reduce((a, t) => a + t.amount, 0);
+  const now = new Date();
+  const periodInProgress = now >= P.start && now < new Date(P.end.getFullYear(), P.end.getMonth(), P.end.getDate() + 1);
+  let prevExp = prevExpFull, trendProrated = false;
+  if (periodInProgress) {
+    // The current period isn't over yet, so T.exp is a partial total. Diffing
+    // it against the previous period's FULL total compares unequal spans —
+    // early in a month this makes spending look like it collapsed purely
+    // because fewer days have passed, nothing to do with how much was
+    // actually spent. Prorating the previous period down to the same
+    // elapsed-day fraction makes the percentage mean something.
+    const elapsedDays = Math.floor((now - P.start) / 86400000) + 1;
+    const currentSpanDays = Math.floor((P.end - P.start) / 86400000) + 1;
+    const prevSpanDays = Math.floor((prevP.end - prevP.start) / 86400000) + 1;
+    prevExp = prevExpFull * Math.min(elapsedDays, currentSpanDays) / prevSpanDays;
+    trendProrated = true;
+  }
   const trendPct = prevExp > 0 ? ((T.exp - prevExp) / prevExp * 100) : (T.exp > 0 ? 100 : 0);
   const expenseDays = new Set(T.rows.filter(t => t.type === 'Expense').map(t => t._date.toDateString()));
   let noSpendDays = 0;
@@ -395,7 +734,7 @@ export function computeView() {
   const insight = {
     avgDaily: money(T.exp / spanDays),
     noSpendDays,
-    trendLabel: (trendPct >= 0 ? '+' : '') + Math.round(trendPct) + '% vs previous period',
+    trendLabel: (trendPct >= 0 ? '+' : '') + Math.round(trendPct) + '% vs ' + (trendProrated ? 'same point last period' : 'previous period'),
     trendColor: trendPct > 0 ? RED : trendPct < 0 ? GREEN : GREY
   };
 
@@ -419,11 +758,104 @@ export function computeView() {
     deleteRecurring: ['Manage recurring rule', ''],
     settings: ['Settings', ''],
     deleteAllData: ['Delete all data', ''],
-    changePassword: ['Change password', '']
+    changePassword: ['Change password', ''],
+    extraPayment: ['Add extra payment', 'Add'],
+    data: ['Data', ''],
+    backups: ['Backups', ''],
+    about: ['About', ''],
+    connectBank: ['Connect a bank', '']
   }[s.modal] || ['', ''];
+  // ---------- bank import review ----------
+  const importAccountOptions = [{ v: '', l: 'Not linked' }]
+    .concat(s.accounts.filter(a => a.active).map(a => ({ v: a.id, l: a.name })));
+
+  const importFeeds = s.feeds.map(f => ({
+    uuid: f.uuid,
+    name: f.name || f.iban || f.uuid,
+    iban: f.iban || '',
+    mappedTo: f.account_id || '',
+    syncEnabled: !!f.sync_enabled,
+    accountOptions: importAccountOptions,
+    onMap: e => mapFeedAction(f.uuid, e.target.value ? +e.target.value : null),
+    onToggleSync: e => toggleFeedSyncAction(f.uuid, e.target.checked)
+  }));
+
+  const importRows = s.staged.map(r => {
+    const a = acct(r.account_id);
+    const isOut = r.direction === 'out';
+    const movementType = r.movement_type || r.tx_type || (isOut ? 'Expense' : 'Income');
+    const isTransfer = movementType === 'Transfer internal';
+    const catOptions = [{ v: '', l: 'Uncategorised' }].concat(
+      s.cats.filter(c => c.kind === (isOut ? 'expense' : 'income')).map(c => ({ v: c.id, l: c.name }))
+    );
+    const btn = (key, label) => ({
+      label, key, active: r.decision === key,
+      onClick: () => decideStaged(r.id, key)
+    });
+    // Either side of the movement can be pointed at one of the user's own
+    // accounts. The default option keeps whatever the bank called the
+    // counterparty — some banks never name the other side by IBAN, so a
+    // transfer between two own accounts can only be recognised by saying so.
+    const asImported = r.counterparty_name || r.remittance || 'Not my account';
+    const sideOptions = [{ v: '', l: '↗ ' + asImported }].concat(
+      s.accounts.filter(x => x.active).map(x => ({ v: x.id, l: x.name }))
+    );
+    return {
+      id: r.id,
+      date: r.booking_date,
+      title: r.counterparty_name || r.remittance || 'Bank transaction',
+      detail: r.counterparty_name && r.remittance && r.remittance !== r.counterparty_name ? r.remittance : '',
+      account: a ? a.name : '—',
+      accountIcon: '#' + (a ? a.icon : 'ic-wallet'),
+      amount: money(isOut ? -r.amount : r.amount, !isOut),
+      amountColor: isOut ? RED : GREEN,
+      typeLabel: movementType,
+      isTransfer,
+      // The two banks either side of one transfer both report it; the queue
+      // says so explicitly rather than quietly hiding one of the rows.
+      pairNote: r.pair_id ? 'Both banks reported this transfer — it will be imported once.' : '',
+      sideOptions,
+      fromAccount: r.from_account_id || '',
+      toAccount: r.to_account_id || '',
+      onFrom: e => setStagedField(r.id, { from_account_id: e.target.value ? +e.target.value : null }),
+      onTo: e => setStagedField(r.id, { to_account_id: e.target.value ? +e.target.value : null }),
+      showCategory: !isTransfer,
+      catOptions,
+      category: r.category_id || '',
+      onCategory: e => setStagedField(r.id, { category_id: e.target.value ? +e.target.value : null }),
+      // A suspected duplicate is described, never acted on. The candidate is
+      // spelled out so the decision is the user's to make on the evidence.
+      hasMatch: !!r.match,
+      matchText: r.match
+        ? `${r.match.date} · ${money(r.match.amount)}${r.match.note ? ' · ' + r.match.note : ''}${r.match.category ? ' · ' + r.match.category : ''}`
+        : '',
+      matchReason: r.match_reason || '',
+      decision: r.decision,
+      decided: r.decision !== 'pending',
+      buttons: [btn('import', 'Import'), ...(r.match ? [btn('link', 'Already have it')] : []), btn('skip', "Don't import")]
+    };
+  });
+
+  const bankConnections = (s.bank.connections || []).filter(c => c.status === 'active').map(c => {
+    const until = c.valid_until ? new Date(c.valid_until) : null;
+    const daysLeft = until ? Math.ceil((until - new Date()) / 86400000) : null;
+    return {
+      name: c.aspsp_name, country: c.aspsp_country,
+      // A consent lapses after about 90 days and the bank then refuses to
+      // answer, so the countdown is shown before it bites rather than after.
+      expiry: daysLeft === null ? '' : daysLeft > 0 ? `access expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : 'access has expired — reconnect',
+      expiring: daysLeft !== null && daysLeft <= 7
+    };
+  });
+
+  const stagedPending = s.staged.filter(r => r.decision === 'pending').length;
+  const stagedReady = s.staged.filter(r => r.decision !== 'pending').length;
+  const stagedFlagged = s.staged.filter(r => r.decision === 'pending' && r.match_tx_id).length;
+
   const deleteAccountTarget = s.modal === 'deleteAccount' ? acct(s.editId) : null;
   const deleteRecurringTarget = s.modal === 'deleteRecurring' ? s.recurring.find(r => r.id === s.editId) : null;
   const deleteMovementTarget = s.modal === 'deleteMovement' ? s.tx.find(t => t.id === s.editId) : null;
+  const extraPaymentTarget = s.modal === 'extraPayment' ? acct(s.editId) : null;
 
   return {
     isNarrow: s.narrow, isWide: !s.narrow,
@@ -441,7 +873,21 @@ export function computeView() {
     }),
     summaryCells: cells,
     isAccounts: s.page === 'accounts', isCategories: s.page === 'categories', isBalance: s.page === 'balance',
-    isOverview: s.page === 'overview', isBudget: s.page === 'budget',
+    isOverview: s.page === 'overview', isBudget: s.page === 'budget', isImport: s.page === 'import',
+    importRows, importFeeds, noStaged: importRows.length === 0, noFeeds: importFeeds.length === 0,
+    stagedPending, stagedReady, stagedFlagged,
+    importBusy: s.importBusy, importMsg: s.importMsg,
+    bankConfigured: !!s.bank.configured, bankConnections, syncDays: s.syncDays,
+    syncDayOptions: [['1', 'Last 24 hours'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']],
+    isConnectBankModal: s.modal === 'connectBank',
+    aspspLoading: s.aspspLoading,
+    aspspCountry: s.aspspCountry,
+    aspspCountryOptions: [['NL', 'Netherlands'], ['IT', 'Italy'], ['DE', 'Germany'], ['BE', 'Belgium'], ['FR', 'France'], ['ES', 'Spain']],
+    onAspspCountry: e => { s.aspspCountry = e.target.value; loadAspsps(); },
+    aspspList: s.aspsps.map(b => ({
+      name: b.name, country: b.country,
+      onClick: () => connectBankAction(b.name, b.country)
+    })),
     showRecurringTab: s.page === 'balance' && s.balanceTab === 'recurring',
     balanceTabs: [['movements', 'Movements'], ['recurring', 'Recurring']].map(t => {
       const on = s.balanceTab === t[0];
@@ -455,8 +901,10 @@ export function computeView() {
     filterBorder: fCount ? ACCENT : TH.border, filterColor: fCount ? ACCENT : GREY,
     dayGroups, noRows: rows.length === 0,
     movementSummary: rows.length + ' movements · net ' + money(rows.reduce((a, t) => a + (t.type === 'Expense' ? -t.amount : t.type === 'Income' ? t.amount : 0), 0), true),
+    spendChartTitle,
     axis, bars, barGap: bars.length > 20 ? '2px' : bars.length > 10 ? '5px' : '12px',
-    netWorthTrend, dashboardAccounts, budgetWatch, topExpenseCats, topIncomeCats, insight, recentTx,
+    netWorthTrend, hasLoanPayoff: !!loanPayoffTrend, loanPayoffTrend: loanPayoffTrend || {},
+    dashboardAccounts, budgetWatch, topExpenseCats, topIncomeCats, insight, recentTx,
     globalBg: gOver ? '#fdecea' : TH.surface, globalTrack: gOver ? '#f6cfcb' : TH.border,
     globalColor: gOver ? RED : ACCENT, globalPct: Math.round(gPct) + '%',
     globalWidth: Math.min(100, gPct) + '%', globalSpent: money(gSp), globalLimit: money(gLim),
@@ -467,7 +915,11 @@ export function computeView() {
       onClick: () => openModal('budget', null, { category: c.id, limit: String(Math.max(50, Math.round((T.byCat[c.id] || 100) / M / 10) * 10)) })
     })),
     drawerOpen: s.drawerOpen,
-    drawerItems: [{ label: 'Data', icon: '#ic-db' }, { label: 'Backups', icon: '#ic-refresh' }, { label: 'About', icon: '#ic-info' }],
+    drawerItems: [
+      { label: 'Data', icon: '#ic-db', onClick: () => openModal('data') },
+      { label: 'Backups', icon: '#ic-refresh', onClick: () => openModal('backups') },
+      { label: 'About', icon: '#ic-info', onClick: () => openAboutModal() }
+    ],
     showModal: !!s.modal, isMovementModal: s.modal === 'movement', isAccountModal: s.modal === 'account',
     isCatModal: s.modal === 'category', isBudgetModal: s.modal === 'budget', isSettingsModal: s.modal === 'settings',
     isDeleteAccountModal: s.modal === 'deleteAccount',
@@ -483,12 +935,21 @@ export function computeView() {
     isDeleteAllDataModal: s.modal === 'deleteAllData', isChangePasswordModal: s.modal === 'changePassword',
     formDangerPassword: s.form.dangerPassword, formDangerConfirm: s.form.dangerConfirm,
     formCurrentPassword: s.form.currentPassword, formNewPassword: s.form.newPassword, formConfirmNewPassword: s.form.confirmNewPassword,
+    isDataModal: s.modal === 'data', isBackupsModal: s.modal === 'backups', isAboutModal: s.modal === 'about',
+    formBackupFileName: s.form.backupFileName, formBackupPassword: s.form.backupPassword, formBackupConfirm: s.form.backupConfirm,
+    appVersion: APP_VERSION, swInfo: s.swInfo,
+    isExtraPaymentModal: s.modal === 'extraPayment',
+    extraPaymentAccountName: extraPaymentTarget ? extraPaymentTarget.name : '',
+    extraPaymentOwed: extraPaymentTarget ? money(Math.max(0, -extraPaymentTarget.balance)) : '',
+    formExtraPaymentAmount: s.form.extraPaymentAmount, formExtraPaymentDate: s.form.extraPaymentDate,
+    formExtraPaymentFrom: s.form.extraPaymentFrom,
+    extraPaymentFromOptions: s.accounts.filter(a => (a.grp === 'spend' || a.grp === 'save') && a.active).map(a => ({ v: a.id, l: a.name })),
     modalTitle: modalMeta[0], modalCta: modalMeta[1],
     movementTabs: [['Expense', 'Expenses'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
       const on = s.form.movement === t[0];
       return { label: t[1], value: t[0], underline: on ? ACCENT : 'transparent', color: on ? ACCENT : GREY, weight: on ? '600' : '500' };
     }),
-    movementKind: s.form.movement, todayLabel: DAYS[new Date().getDay()] + ' ' + new Date().getDate() + ' ' + MONTHS[new Date().getMonth()].toUpperCase() + ' ' + new Date().getFullYear(),
+    movementKind: s.form.movement, formDate: s.form.date || localDateStr(),
     isTransferMovement: s.form.movement === 'Transfer internal',
     movementCats: s.cats.filter(c => c.kind === (s.form.movement === 'Income' ? 'income' : 'expense')).map(c => ({
       id: c.id, name: c.name, icon: '#' + c.icon, bg: c.color, color: '#fff',
@@ -497,18 +958,22 @@ export function computeView() {
     accountOptions: s.accounts.filter(a => a.active).map(a => ({ v: a.id, l: a.name + ' · ' + money(a.balance) })),
     toAccountOptions: s.accounts.filter(a => a.active && a.id !== s.form.account).map(a => ({ v: a.id, l: a.name })),
     formAmount: s.form.amount, formAccount: s.form.account, formToAccount: s.form.toAccount, formNote: s.form.note,
-    accountKinds: [['spend', 'Account', 'ic-wallet'], ['save', 'Savings account', 'ic-piggy'], ['credit', 'Credit card', 'ic-card']].map(k => ({
+    accountKinds: [['spend', 'Account', 'ic-wallet'], ['save', 'Savings account', 'ic-piggy'], ['credit', 'Credit card', 'ic-card'], ['loan', 'Loan', 'ic-bank']].map(k => ({
       value: k[0], label: k[1], icon: '#' + k[2],
       ring: s.form.kind === k[0] ? ACCENT : TH.border, dot: s.form.kind === k[0] ? ACCENT : 'transparent'
     })),
-    isSavingsKind: s.form.kind === 'save', isCreditKind: s.form.kind === 'credit',
-    showIban: s.form.kind !== 'credit' && (s.form.kind === 'save' || s.form.type === 'Bank'),
-    balanceLabel: s.form.kind === 'credit' ? 'Current balance owed (optional)' : 'Initial balance',
-    goalLabel: s.form.kind === 'credit' ? 'Credit limit (optional)' : 'Savings goal',
+    isSavingsKind: s.form.kind === 'save', isCreditKind: s.form.kind === 'credit', isLoanKind: s.form.kind === 'loan',
+    showIban: s.form.kind !== 'credit' && s.form.kind !== 'loan' && (s.form.kind === 'save' || s.form.type === 'Bank'),
+    balanceLabel: s.form.kind === 'credit' ? 'Current balance owed (optional)' : s.form.kind === 'loan' ? 'Current amount owed' : 'Initial balance',
+    goalLabel: s.form.kind === 'credit' ? 'Credit limit (optional)' : s.form.kind === 'loan' ? 'Original loan amount (optional)' : 'Savings goal',
     formAutopayEnabled: s.form.autopayEnabled, formAutopayFrom: s.form.autopayFrom,
     formAutopayDay: s.form.autopayDay, formAutopayWeekendRule: s.form.autopayWeekendRule,
     autopayFromOptions: s.accounts.filter(a => a.grp === 'spend' && a.active && a.id !== s.editId).map(a => ({ v: a.id, l: a.name })),
     autopayDayOptions: Array.from({ length: 31 }, (_, i) => i + 1).map(n => ({ v: String(n), l: String(n) })),
+    formLoanFrom: s.form.loanFrom, formLoanRate: s.form.loanRate, formLoanTermMonths: s.form.loanTermMonths,
+    formLoanCategory: s.form.loanCategory, formLoanDay: s.form.loanDay, formLoanWeekendRule: s.form.loanWeekendRule,
+    loanFromOptions: s.accounts.filter(a => a.grp === 'spend' && a.active && a.id !== s.editId).map(a => ({ v: a.id, l: a.name })),
+    loanCategoryOptions: s.cats.filter(c => c.kind === 'expense').map(c => ({ v: c.id, l: c.name })),
     formIban: s.form.iban, formError: s.formError,
     recurTypeTabs: [['Expense', 'Expense'], ['Income', 'Income'], ['Transfer internal', 'Transfer']].map(t => {
       const on = s.form.recurMovement === t[0];
@@ -548,7 +1013,8 @@ export function computeView() {
     canDelete: !!s.editId,
     formCategory: s.form.category, formLimit: s.form.limit,
     budgetCatOptions: (s.editId ? [cat(s.editId)] : unbudgeted()).filter(Boolean).map(c => ({ v: c.id, l: c.name })),
-    budgetHint: 'Monthly limit. For ' + P.title.toLowerCase() + ' it is compared against ' + M + ' month' + (M > 1 ? 's' : '') + ' of spending.',
+    budgetHint: 'Monthly limit. For ' + P.title.toLowerCase() + ' it is compared against ' +
+      (s.mode === 'week' ? 'a week\'s share of the monthly limit' : M + ' month' + (M > 1 ? 's' : '') + ' of spending') + '.',
     canRemoveBudget: !!s.editId
   };
 }
