@@ -20,7 +20,12 @@ export async function loadAll() {
   state.cats = cats;
   state.budgets = {};
   budgetRows.forEach(b => { state.budgets[b.category_id] = b.monthly_limit; });
-  state.tx = tx.map(t => Object.assign({}, t, { _date: new Date(t.date) }));
+  // 'T00:00:00' forces local-midnight parsing. A bare date string ("2026-08-31")
+  // parses as UTC midnight per ECMA-262, which in a UTC+1/+2 timezone lands an
+  // hour or two into local Sept 1 — one hour past the period boundary below
+  // (built with new Date(y, m, d), local by construction) — silently dropping
+  // last-day-of-period transactions from every period-scoped view.
+  state.tx = tx.map(t => Object.assign({}, t, { _date: new Date(t.date + 'T00:00:00') }));
   state.recurring = recurring;
   // Defensive: an import page that renders empty is a far better failure than
   // one that takes the whole app down, and these two are the only collections

@@ -1,4 +1,4 @@
-import { PAL } from './constants.js';
+import { PAL, localDateStr } from './constants.js';
 
 export function loadThemePref(key, fallback) {
   try { const v = localStorage.getItem(key); return v || fallback; } catch (e) { return fallback; }
@@ -22,13 +22,13 @@ export const state = {
   numberFormat: loadThemePref('mm_number_format', 'comma'),
   form: {
     name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: '', toAccount: '',
-    icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '',
+    icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '', date: localDateStr(),
     recurMovement: 'Expense', freq: 'monthly', intervalN: '1', weekday: '0', dayOfMonth: '1', monthOfYear: '1',
-    nthBusinessDay: '-1', weekendRule: 'none', startDate: new Date().toISOString().slice(0, 10), endDate: '', noEnd: true,
+    nthBusinessDay: '-1', weekendRule: 'none', startDate: localDateStr(), endDate: '', noEnd: true,
     dangerPassword: '', dangerConfirm: '', currentPassword: '', newPassword: '', confirmNewPassword: '',
     autopayEnabled: false, autopayFrom: '', autopayDay: '1', autopayWeekendRule: 'none',
     loanFrom: '', loanRate: '', loanTermMonths: '', loanCategory: '', loanDay: '1', loanWeekendRule: 'none',
-    extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10), extraPaymentRuleId: '', extraPaymentFrom: '',
+    extraPaymentAmount: '', extraPaymentDate: localDateStr(), extraPaymentRuleId: '', extraPaymentFrom: '',
     backupFileData: null, backupFileName: '', backupPassword: '', backupConfirm: ''
   }
 };

@@ -538,6 +538,7 @@ class TransactionPatch(BaseModel):
     category_id: Optional[int] = None
     amount: Optional[float] = None
     note: Optional[str] = None
+    date: Optional[str] = None
 
 
 @app.patch("/api/transactions/{transaction_id}")

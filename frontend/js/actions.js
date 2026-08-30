@@ -2,12 +2,17 @@ import { state } from './state.js';
 import { api, loadAll } from './api.js';
 import { render } from './render.js';
 import { num, unbudgeted, acct, openModal } from './viewmodel.js';
-import { PAL } from './constants.js';
+import { PAL, localDateStr } from './constants.js';
 
 // ---------- mutations (call the API, then reload + render) ----------
 export async function submit() {
   const f = state.form;
-  if ((state.modal === 'movement' || state.modal === 'recurring') && !num(f.amount)) { state.modal = null; state.formError = ''; render(); return; }
+  // An empty, non-numeric, or zero amount used to close the modal silently —
+  // the save looked successful but nothing was written. Now it stays open
+  // with a visible error instead, same as any other rejected submission.
+  if ((state.modal === 'movement' || state.modal === 'recurring') && !num(f.amount)) {
+    state.formError = 'Enter an amount'; render(); return;
+  }
   try {
     await submitModal(f);
   } catch (e) {
@@ -104,12 +109,12 @@ export async function submitModal(f) {
       type: f.movement,
       category_id: (f.movement === 'Expense' || f.movement === 'Income') ? (f.category || null) : null,
       amount: num(f.amount),
-      note: f.note && f.note.trim() ? f.note.trim() : null
+      note: f.note && f.note.trim() ? f.note.trim() : null,
+      date: f.date || localDateStr()
     };
     if (state.editId) {
       await api('/api/transactions/' + state.editId, { method: 'PATCH', body: JSON.stringify(body) });
     } else {
-      body.date = new Date().toISOString().slice(0, 10);
       await api('/api/transactions', { method: 'POST', body: JSON.stringify(body) });
     }
     state.page = 'balance'; state.balanceTab = 'movements';

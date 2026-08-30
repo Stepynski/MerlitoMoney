@@ -824,7 +824,7 @@ export function renderApp() {
               <div style="background:${TH.surface};border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:6px;align-items:center">
                 <span style="font-size:12px;color:${GREY};letter-spacing:0.06em;text-transform:uppercase">${V.movementKind}</span>
                 <input id="f-amount" value="${esc(V.formAmount)}" placeholder="0,00 €" inputmode="decimal" style="border:0;background:transparent;text-align:center;font-size:30px;font-weight:700;width:100%;font-variant-numeric:tabular-nums;outline:none">
-                <span style="font-size:12.5px;color:${GREY}">${V.todayLabel}</span>
+                <input type="date" data-change="${H(e => { set('date', e.target.value); render(); })}" value="${V.formDate}" style="border:0;background:transparent;text-align:center;font-size:12.5px;color:${GREY};cursor:pointer;outline:none;font-family:inherit">
               </div>
               ${!V.isTransferMovement ? `
                 <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -847,6 +847,7 @@ export function renderApp() {
               <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Description (optional)
                 <input id="f-note" value="${esc(V.formNote)}" placeholder="e.g. Weekly groceries" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
               </label>
+              ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
             </div>` : ''}
 
           ${V.isAccountModal ? `

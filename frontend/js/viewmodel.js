@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { TH, ACCENT, GREY } from './theme-runtime.js';
-import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS, APP_VERSION } from './constants.js';
+import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS, APP_VERSION, localDateStr } from './constants.js';
 import { render } from './render.js';
 import {
   reopenAccount, toggleNetWorthAction, openAboutModal,
@@ -145,15 +145,15 @@ export function openModal(kind, editId, form) {
   state.modal = kind; state.editId = editId || null; state.drawerOpen = false; state.formError = '';
   state.form = Object.assign({
     name: '', type: 'Bank', balance: '', goal: '', limit: '', category: '', amount: '', account: state.accounts[0] ? state.accounts[0].id : '', toAccount: '',
-    icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '',
+    icon: 'ic-cart', color: PAL[0], kind: 'spend', movement: 'Expense', iban: '', note: '', date: localDateStr(),
     recurMovement: 'Expense', freq: 'monthly', intervalN: '1', weekday: '0', dayOfMonth: '1', monthOfYear: '1',
-    nthBusinessDay: '-1', weekendRule: 'none', startDate: new Date().toISOString().slice(0, 10), endDate: '', noEnd: true,
+    nthBusinessDay: '-1', weekendRule: 'none', startDate: localDateStr(), endDate: '', noEnd: true,
     dangerPassword: '', dangerConfirm: '', currentPassword: '', newPassword: '', confirmNewPassword: '',
     autopayEnabled: false, autopayFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '', autopayDay: '1', autopayWeekendRule: 'none',
     loanFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '', loanRate: '', loanTermMonths: '',
     loanCategory: (state.cats.find(c => c.name === 'Loan Interest') || state.cats.find(c => c.kind === 'expense') || {}).id || '',
     loanDay: '1', loanWeekendRule: 'none',
-    extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10), extraPaymentRuleId: '',
+    extraPaymentAmount: '', extraPaymentDate: localDateStr(), extraPaymentRuleId: '',
     extraPaymentFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '',
     backupFileData: null, backupFileName: '', backupPassword: '', backupConfirm: ''
   }, form || {});
@@ -245,7 +245,7 @@ export function computeView() {
   const addExtraPayment = a => {
     const rule = s.recurring.find(r => r.to_account_id === a.id && r.amount_mode === 'amortized');
     openModal('extraPayment', a.id, {
-      extraPaymentAmount: '', extraPaymentDate: new Date().toISOString().slice(0, 10),
+      extraPaymentAmount: '', extraPaymentDate: localDateStr(),
       extraPaymentRuleId: rule ? rule.id : '',
       extraPaymentFrom: rule ? rule.account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || '')
     });
@@ -303,7 +303,7 @@ export function computeView() {
 
   const editMovement = t => openModal('movement', t.id, {
     movement: t.type, category: t.category_id || '', amount: money(t.amount).replace(' €', '').trim(),
-    account: t.account_id, toAccount: t.to_account_id || '', note: t.note || ''
+    account: t.account_id, toAccount: t.to_account_id || '', note: t.note || '', date: t.date
   });
   const editRecurring = r => openModal('recurring', r.id, {
     name: r.name, recurMovement: r.type, account: r.account_id, toAccount: r.to_account_id || '',
@@ -846,7 +846,7 @@ export function computeView() {
       const on = s.form.movement === t[0];
       return { label: t[1], value: t[0], underline: on ? ACCENT : 'transparent', color: on ? ACCENT : GREY, weight: on ? '600' : '500' };
     }),
-    movementKind: s.form.movement, todayLabel: DAYS[new Date().getDay()] + ' ' + new Date().getDate() + ' ' + MONTHS[new Date().getMonth()].toUpperCase() + ' ' + new Date().getFullYear(),
+    movementKind: s.form.movement, formDate: s.form.date || localDateStr(),
     isTransferMovement: s.form.movement === 'Transfer internal',
     movementCats: s.cats.filter(c => c.kind === (s.form.movement === 'Income' ? 'income' : 'expense')).map(c => ({
       id: c.id, name: c.name, icon: '#' + c.icon, bg: c.color, color: '#fff',
