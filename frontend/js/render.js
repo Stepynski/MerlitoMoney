@@ -19,10 +19,22 @@ export function H(fn) { handlers.push(fn); return handlers.length - 1; }
 // this is what caused closing the "add account" modal to also trigger the
 // Overview nav button underneath it. A single delegated listener on a node
 // that's never itself torn down avoids that whole failure class.
+// Selecting text (e.g. an error message) with a drag that overshoots the
+// modal box releases the mouse over the backdrop, and a plain click listener
+// can't tell that apart from an actual "close the modal" click — both fire
+// with the backdrop as the target. Tracking where the drag *started* fixes
+// it: a backdrop click only closes the modal if the mousedown was on the
+// backdrop too, not merely the mouseup that produced the click.
+let mouseDownTarget = null;
+
 export function wireOnce(root) {
+  root.addEventListener('mousedown', e => { mouseDownTarget = e.target; });
   root.addEventListener('click', e => {
     const el = e.target.closest('[data-click]');
-    if (el) handlers[+el.dataset.click](e);
+    if (el) {
+      if (el.dataset.backdrop === '1' && mouseDownTarget !== el) return;
+      handlers[+el.dataset.click](e);
+    }
   });
   root.addEventListener('change', e => {
     const el = e.target.closest('[data-change]');
@@ -723,7 +735,7 @@ export function renderApp() {
     </nav>`;
 
   const drawer = !V.drawerOpen ? '' : `
-    <div data-click="${H(() => { state.drawerOpen = false; render(); })}" style="position:fixed;inset:0;z-index:60;background:rgba(20,24,32,0.42);animation:kb-in .18s ease both">
+    <div data-click="${H(() => { state.drawerOpen = false; render(); })}" data-backdrop="1" style="position:fixed;inset:0;z-index:60;background:rgba(20,24,32,0.42);animation:kb-in .18s ease both">
       <div data-click="${H(e => e.stopPropagation())}" style="width:min(300px,82vw);height:100%;background:${TH.surface2};display:flex;flex-direction:column;box-shadow:4px 0 24px rgba(16,24,40,0.2)">
         <div style="background:${TH.hero};padding:22px 20px 18px;display:flex;flex-direction:column;gap:10px">
           <span style="width:56px;height:56px;border-radius:18px;background:#ffd43b;display:grid;place-items:center;overflow:hidden"><img src="cat-logo.png" alt="MerlitoMoney" style="width:74%;height:74%;object-fit:contain"></span>
@@ -744,7 +756,7 @@ export function renderApp() {
     </div>`;
 
   const modal = !V.showModal ? '' : `
-    <div data-click="${H(() => { console.log('[mm debug] modal closed via backdrop, modal was', state.modal); state.modal = null; render(); })}" style="position:fixed;inset:0;z-index:70;background:rgba(20,24,32,0.42);display:flex;align-items:center;justify-content:center;padding:16px;animation:kb-in .16s ease both">
+    <div data-click="${H(() => { console.log('[mm debug] modal closed via backdrop, modal was', state.modal); state.modal = null; render(); })}" data-backdrop="1" style="position:fixed;inset:0;z-index:70;background:rgba(20,24,32,0.42);display:flex;align-items:center;justify-content:center;padding:16px;animation:kb-in .16s ease both">
       <div data-click="${H(e => e.stopPropagation())}" style="background:${TH.surface2};border-radius:22px;width:100%;max-width:460px;max-height:88vh;overflow:auto;box-shadow:0 24px 60px rgba(16,24,40,0.3);animation:kb-up .2s ease both">
         <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:${TH.surface2};z-index:2">
           <button data-click="${H(() => { console.log('[mm debug] modal closed via X button, modal was', state.modal); state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
