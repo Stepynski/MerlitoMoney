@@ -24,9 +24,16 @@ export function num(v) {
   // separator (en-US convention) — the opposite of the default 'comma'
   // mode (de-DE convention), where '.' is stripped as thousands and ','
   // becomes the decimal point.
-  return state.numberFormat === 'point'
-    ? parseFloat(s.replace(/,/g, '')) || 0
-    : parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
+  if (state.numberFormat === 'point') return parseFloat(s.replace(/,/g, '')) || 0;
+  // In comma mode a single '.' followed by only 1-2 trailing digits ("10.5",
+  // "10.50") can only be a decimal point typed out of point-locale habit —
+  // a genuine thousands separator always groups exactly 3 digits ("1.234",
+  // "12.345,67"). Stripping it as a thousands separator here used to turn
+  // "10.5" into 105 and "50.00" into 5000: a silent 10x-100x error with no
+  // warning. This shape is unambiguous, so it's read as the decimal it can
+  // only be; anything else falls through to the normal comma-decimal rule.
+  if (!s.includes(',') && /^-?\d*\.\d{1,2}$/.test(s.trim())) return parseFloat(s) || 0;
+  return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
 }
 // Formats a raw number for pre-filling an *editable* form field, in
 // exactly the format num() will parse back — money() already does this
@@ -61,7 +68,17 @@ export function shiftedAnchor(dir) {
   return a;
 }
 export function shiftPeriod(dir) { state.anchor = shiftedAnchor(dir); }
-export function months() { const p = period(); return Math.max(1, Math.round((p.end - p.start) / 86400000 / 30.4)); }
+export function months() {
+  // Month/quarter/year periods round to a whole number of months by
+  // construction (28-31, ~90, ~365 days), so the floor of 1 is only ever a
+  // defensive minimum there. A week is genuinely a fraction of a month —
+  // flooring it to 1 was comparing a week of spending against a FULL
+  // month's limit, letting a budget look untouched for the first three
+  // weeks of every month no matter how much was actually spent.
+  if (state.mode === 'week') return 7 / 30.4;
+  const p = period();
+  return Math.max(1, Math.round((p.end - p.start) / 86400000 / 30.4));
+}
 export function scoped() { const p = period(); return state.tx.filter(t => t._date >= p.start && t._date <= p.end); }
 export function totals() {
   const rows = scoped(), byCat = {}, counts = {};
@@ -191,6 +208,15 @@ export function computeView() {
   const s = state, P = period(), T = totals(), M = months();
   const spendable = s.accounts.filter(a => a.grp === 'spend').reduce((x, a) => x + a.balance, 0);
   const total = s.accounts.filter(a => a.include_in_net_worth).reduce((x, a) => x + a.balance, 0);
+  // Used only for the "Savings" cell below (total - spendable), which needs
+  // both sides on the same net-worth-inclusion basis. `spendable` above
+  // deliberately isn't: it's a cash-flow figure ("what I can spend right
+  // now"), so it stays as every spend account regardless of the net-worth
+  // toggle. Reusing it for Savings mixed the two bases — a spend account
+  // excluded from net worth appeared in spendable but never in total,
+  // silently pulling Savings down; a credit/loan account included in net
+  // worth appeared in total but was never in spendable to begin with.
+  const spendableInNetWorth = s.accounts.filter(a => a.grp === 'spend' && a.include_in_net_worth).reduce((x, a) => x + a.balance, 0);
   const saldo = T.inc - T.exp;
   const expView = s.view === 'expenses';
 
@@ -209,7 +235,7 @@ export function computeView() {
   } else if (s.page === 'accounts') {
     cells = [
       { label: 'Spendable', value: money(spendable), color: TH.text },
-      { label: 'Savings', value: money(total - spendable), color: GREEN },
+      { label: 'Savings', value: money(total - spendableInNetWorth), color: GREEN },
       { label: 'Net worth', value: money(total), color: TH.text }
     ].map(c => Object.assign(c, { labelColor: GREY, weight: '600', underline: 'transparent', cursor: 'default', onClick: () => {} }));
   } else if (s.page === 'balance' && s.balanceTab === 'recurring') {
@@ -379,6 +405,19 @@ export function computeView() {
   const donutBase = s.view === 'income' ? T.inc : T.exp;
   const donutCats = s.cats.filter(c => c.kind === (s.view === 'income' ? 'income' : 'expense'))
     .map(c => ({ c, v: T.byCat[c.id] || 0 })).filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+  // A row with no category (possible via bank import) counts toward
+  // donutBase but has no matching entry above — the gap used to be
+  // invisible: conic-gradient extends the final stop's color to fill
+  // anything short of 100%, so the last real category silently absorbed it
+  // and every legend percentage read low. Giving it its own grey slice
+  // keeps the gradient and the legend numbers honest, and surfaces exactly
+  // what needs categorizing.
+  const categorizedSum = donutCats.reduce((a, x) => a + x.v, 0);
+  const uncategorized = donutBase - categorizedSum;
+  if (uncategorized > 0.005) {
+    donutCats.push({ c: { name: 'Uncategorized', color: GREY, icon: 'ic-dots' }, v: uncategorized });
+    donutCats.sort((a, b) => b.v - a.v); // so a large uncategorized slice isn't crowded out of the top-6 legend
+  }
   let accSum = 0;
   const stops = donutCats.map(x => {
     const from = accSum / (donutBase || 1) * 100; accSum += x.v;
@@ -951,7 +990,8 @@ export function computeView() {
     canDelete: !!s.editId,
     formCategory: s.form.category, formLimit: s.form.limit,
     budgetCatOptions: (s.editId ? [cat(s.editId)] : unbudgeted()).filter(Boolean).map(c => ({ v: c.id, l: c.name })),
-    budgetHint: 'Monthly limit. For ' + P.title.toLowerCase() + ' it is compared against ' + M + ' month' + (M > 1 ? 's' : '') + ' of spending.',
+    budgetHint: 'Monthly limit. For ' + P.title.toLowerCase() + ' it is compared against ' +
+      (s.mode === 'week' ? 'a week\'s share of the monthly limit' : M + ' month' + (M > 1 ? 's' : '') + ' of spending') + '.',
     canRemoveBudget: !!s.editId
   };
 }

@@ -481,13 +481,13 @@ export function renderApp() {
 
       <div class="mm-dash-split">
         <section style="display:flex;flex-direction:column;gap:8px">
-          <span style="font-weight:700;font-size:15px;padding:0 4px">Top expense categories</span>
+          <span style="font-weight:700;font-size:15px;padding:0 4px">Top expense categories <span style="font-weight:500;color:${GREY};font-size:12.5px">· ${V.periodTitle}</span></span>
           <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
             ${V.topExpenseCats.length ? catMiniList(V.topExpenseCats) : `<div style="padding:24px 16px;text-align:center;color:${GREY};font-size:13.5px">No expenses yet.</div>`}
           </div>
         </section>
         <section style="display:flex;flex-direction:column;gap:8px">
-          <span style="font-weight:700;font-size:15px;padding:0 4px">Top income categories</span>
+          <span style="font-weight:700;font-size:15px;padding:0 4px">Top income categories <span style="font-weight:500;color:${GREY};font-size:12.5px">· ${V.periodTitle}</span></span>
           <div style="background:${TH.surface};border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
             ${V.topIncomeCats.length ? catMiniList(V.topIncomeCats) : `<div style="padding:24px 16px;text-align:center;color:${GREY};font-size:13.5px">No income yet.</div>`}
           </div>
@@ -513,7 +513,7 @@ export function renderApp() {
       ${V.budgetWatch.length ? `
       <section style="display:flex;flex-direction:column;gap:8px">
         <div style="display:flex;justify-content:space-between;align-items:baseline;padding:0 4px">
-          <span style="font-weight:700;font-size:15px">Budget status</span>
+          <span style="font-weight:700;font-size:15px">Budget status <span style="font-weight:500;color:${GREY};font-size:12.5px">· ${V.periodTitle}</span></span>
           <button data-click="${H(() => { state.page = 'budget'; render(); })}" style="border:0;background:transparent;color:${ACCENT};font-weight:600;cursor:pointer;font-size:13px;padding:0">See all</button>
         </div>
         <div style="background:${V.globalBg};border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
