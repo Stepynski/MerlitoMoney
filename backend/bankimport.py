@@ -531,9 +531,30 @@ def commit_staged(conn):
 
         partner = None
         if row["pair_id"]:
-            partner = next((r for r in rows if r["id"] == row["pair_id"]), None)
+            partner = next((r for r in rows if r["id"] == row["pair_id"] and r["decision"] == "import"), None)
+            if partner is None:
+                # The partner wasn't decided in this batch — it may still be
+                # sitting untouched in the queue. Pairing is established
+                # through mandatory gates (matching IBANs, opposite
+                # direction, equal amount), not the soft scoring this queue
+                # otherwise refuses to resolve on its own, so it is already
+                # certain rather than merely suggested — the row's own
+                # pairNote already promises "it will be imported once".
+                # Leaving the partner queued here would silently break that
+                # promise: once this row's transaction exists, the partner's
+                # external_id-based duplicate check can no longer see it
+                # (find_match_candidates excludes already-linked
+                # transactions on purpose), so the partner would resurface
+                # as if unmatched and could be imported a second time.
+                live = conn.execute(
+                    "SELECT * FROM import_staging WHERE id = ? AND decision = 'pending'",
+                    (row["pair_id"],),
+                ).fetchone()
+                partner = dict(live) if live else None
+                if partner is not None:
+                    conn.execute("DELETE FROM import_staging WHERE id = ?", (partner["id"],))
 
-        if partner is not None and partner["decision"] == "import":
+        if partner is not None:
             # Two banks reporting one transfer: book it once, from the side the
             # money left towards the side it arrived on.
             out_row = row if row["direction"] == "out" else partner
