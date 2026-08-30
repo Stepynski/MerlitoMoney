@@ -33,18 +33,4 @@ export const state = {
   }
 };
 
-// Debug instrumentation: state.page is the one piece of state a user has
-// reported changing unexpectedly (closing the "add account" modal jumping
-// to Overview) with no reproducible cause found by reading the code. This
-// setter prints a stack trace on every change so the real trigger — a bug
-// here, a stale cached build, or something outside this module entirely —
-// shows up directly in the browser console instead of requiring more guesses.
-let _page = 'overview';
-Object.defineProperty(state, 'page', {
-  enumerable: true,
-  get() { return _page; },
-  set(v) {
-    if (v !== _page) console.trace('[mm debug] state.page:', _page, '->', v);
-    _page = v;
-  }
-});
+state.page = 'overview';
