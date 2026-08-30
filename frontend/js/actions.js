@@ -32,13 +32,27 @@ export async function submitModal(f) {
     const isLoan = f.kind === 'loan';
     const editing = acct(state.editId);
     const wasCredit = editing && editing.grp === 'credit';
+    // For a credit/loan account being edited, the field is labelled "Current
+    // amount owed" and pre-filled from starting_balance (see editAccount) —
+    // but starting_balance is the debt at account creation, not today's. If
+    // the field is written straight back as typed, entering what the label
+    // actually asks for (today's real debt) silently overwrites the origin
+    // point: every payment made since creation would then apply a second
+    // time, jumping the shown balance by the sum of all of them. So the
+    // entered figure is treated as what it's labelled to be — the desired
+    // balance *today* — and starting_balance is solved backward from it,
+    // holding the effect of every transaction since creation constant. For
+    // a brand-new account there is no such history (delta is 0), so this
+    // reduces to writing the figure straight through, same as before.
+    const desiredCurrent = (isCredit || isLoan) ? -Math.abs(num(f.balance)) : num(f.balance);
+    const priorDelta = (editing && (isCredit || isLoan)) ? (editing.balance - editing.starting_balance) : 0;
     const body = {
       name: f.name.trim() || 'New account',
       type: isSave ? 'Savings' : isCredit ? 'Credit card' : isLoan ? 'Loan' : f.type,
       icon: isSave ? 'ic-piggy' : isCredit ? 'ic-card' : isLoan ? 'ic-bank' : (f.type === 'Cash' ? 'ic-cash' : f.type === 'Wallet' ? 'ic-wallet' : 'ic-bank'),
       color: isSave ? '#40c057' : isCredit ? '#e03b34' : isLoan ? '#e8890c' : (editing ? editing.color : PAL[state.accounts.length % PAL.length]),
       grp: isSave ? 'save' : isCredit ? 'credit' : isLoan ? 'loan' : 'spend',
-      starting_balance: (isCredit || isLoan) ? -Math.abs(num(f.balance)) : num(f.balance),
+      starting_balance: desiredCurrent - priorDelta,
       goal_amount: (isSave || isCredit || isLoan) && num(f.goal) > 0 ? num(f.goal) : null,
       iban: f.iban ? f.iban.trim() : null
     };

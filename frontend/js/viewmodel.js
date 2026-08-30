@@ -264,7 +264,13 @@ export function computeView() {
 
   const editAccount = a => openModal('account', a.id, {
     name: a.name, type: a.type,
-    balance: (a.grp === 'credit' || a.grp === 'loan') ? numStr(Math.abs(a.starting_balance)) : numStr(a.starting_balance),
+    // Pre-filled with today's actual debt (a.balance), matching the field's
+    // "Current amount/balance owed" label — not the creation-time
+    // starting_balance, which is a different number entirely once any
+    // payment has been made. submitModal() solves starting_balance back out
+    // of whatever is entered here, so leaving this untouched round-trips to
+    // the same starting_balance it started with.
+    balance: (a.grp === 'credit' || a.grp === 'loan') ? numStr(Math.abs(a.balance)) : numStr(a.starting_balance),
     goal: a.goal_amount ? numStr(a.goal_amount) : '', kind: a.grp, iban: a.iban || '',
     autopayEnabled: !!(a.autopay && a.autopay.enabled),
     autopayFrom: a.autopay && a.autopay.from_account_id ? a.autopay.from_account_id : ((s.accounts.find(x => x.grp === 'spend') || {}).id || ''),
