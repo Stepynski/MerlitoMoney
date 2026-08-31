@@ -465,13 +465,18 @@ export function computeView() {
     const key = t._date.toDateString();
     let g = groups.find(x => x.key === key);
     if (!g) { g = { key, date: t._date, items: [], net: 0 }; groups.push(g); }
-    const c = cat(t.category_id), a = acct(t.account_id);
+    const c = cat(t.category_id), a = acct(t.account_id), toA = t.to_account_id ? acct(t.to_account_id) : null;
     const isExp = t.type === 'Expense', isInc = t.type === 'Income';
     g.net += isExp ? -t.amount : isInc ? t.amount : 0;
+    // A transfer moves between two accounts, so its own account line should
+    // say so — "Source → Destination" — rather than naming only the source,
+    // which left the destination's own filtered view with no visible clue
+    // where the money came from.
+    const accountLabel = toA ? (a ? a.name : '—') + ' → ' + toA.name : (a ? a.name : '—');
     g.items.push({
       title: c ? c.name : (t.type === 'Transfer internal' ? 'Internal transfer' : 'External transfer'),
       icon: '#' + (c ? c.icon : 'ic-transfer'), color: c ? c.color : GREY,
-      account: a ? a.name : '—', accountIcon: '#' + (a ? a.icon : 'ic-wallet'),
+      account: accountLabel, accountIcon: '#' + (a ? a.icon : 'ic-wallet'),
       amount: money(isExp ? -t.amount : t.amount, isInc), type: t.type, note: t.note || '',
       amountColor: isExp ? RED : isInc ? GREEN : GREY,
       onEdit: () => editMovement(t),
@@ -746,11 +751,11 @@ export function computeView() {
   };
 
   const recentTx = s.tx.slice(0, 5).map(t => {
-    const c = cat(t.category_id), a = acct(t.account_id), isExp = t.type === 'Expense', isInc = t.type === 'Income';
+    const c = cat(t.category_id), a = acct(t.account_id), toA = t.to_account_id ? acct(t.to_account_id) : null, isExp = t.type === 'Expense', isInc = t.type === 'Income';
     return {
       title: c ? c.name : (t.type === 'Transfer internal' ? 'Internal transfer' : 'External transfer'),
       icon: '#' + (c ? c.icon : 'ic-transfer'), color: c ? c.color : GREY,
-      account: a ? a.name : '—', date: dm(t._date).slice(0, 5), note: t.note || '',
+      account: toA ? (a ? a.name : '—') + ' → ' + toA.name : (a ? a.name : '—'), date: dm(t._date).slice(0, 5), note: t.note || '',
       amount: money(isExp ? -t.amount : t.amount, isInc), amountColor: isExp ? RED : isInc ? GREEN : GREY
     };
   });

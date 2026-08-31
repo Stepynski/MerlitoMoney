@@ -358,8 +358,8 @@ export function renderApp() {
                     <span style="width:38px;height:38px;border-radius:50%;background:${t.color};color:#fff;display:grid;place-items:center;flex:none"><svg width="19" height="19"><use href="${t.icon}"></use></svg></span>
                     <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
                       <span style="font-weight:600;font-size:14.5px">${t.title}</span>
-                      <span style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:${GREY}">
-                        <svg width="13" height="13"><use href="${t.accountIcon}"></use></svg>${t.account}
+                      <span style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:${GREY};min-width:0">
+                        <svg width="13" height="13" style="flex:none"><use href="${t.accountIcon}"></use></svg><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.account}</span>
                       </span>
                       ${t.note ? `<span style="font-size:12.5px;color:${TH.textFaint};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.note)}</span>` : ''}
                     </span>
