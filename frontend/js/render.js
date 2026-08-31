@@ -846,6 +846,7 @@ export function renderApp() {
               <label style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:${GREY}">Description (optional)
                 <input id="f-note" value="${esc(V.formNote)}" placeholder="e.g. Weekly groceries" style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:15px;outline:none">
               </label>
+              ${state.editId ? `<span style="font-size:11.5px;color:${TH.textFaint}">ID #${state.editId}</span>` : ''}
               ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
             </div>` : ''}
 

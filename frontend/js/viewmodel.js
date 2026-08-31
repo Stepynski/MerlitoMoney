@@ -968,7 +968,12 @@ export function computeView() {
       opacity: s.form.category === c.id ? '1' : '0.55'
     })),
     accountOptions: s.accounts.filter(a => a.active).map(a => ({ v: a.id, l: a.name + ' · ' + money(a.balance) })),
-    toAccountOptions: s.accounts.filter(a => a.active && a.id !== s.form.account).map(a => ({ v: a.id, l: a.name })),
+    // A leading blank option so a transfer with no real destination (either
+    // a not-yet-touched "New movement" form, or an older transfer saved
+    // before to_account_id was required) renders as visibly unselected —
+    // without it, the browser auto-selects the first real account with no
+    // change event, silently showing a destination that was never chosen.
+    toAccountOptions: [{ v: '', l: 'Select account' }].concat(s.accounts.filter(a => a.active && a.id !== s.form.account).map(a => ({ v: a.id, l: a.name }))),
     formAmount: s.form.amount, formAccount: s.form.account, formToAccount: s.form.toAccount, formNote: s.form.note,
     accountKinds: [['spend', 'Account', 'ic-wallet'], ['save', 'Savings account', 'ic-piggy'], ['credit', 'Credit card', 'ic-card'], ['loan', 'Loan', 'ic-bank']].map(k => ({
       value: k[0], label: k[1], icon: '#' + k[2],
