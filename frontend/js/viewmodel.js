@@ -450,7 +450,14 @@ export function computeView() {
     : [['expense', 'Expense categories', T.exp]]).map(x => ({ title: x[1], total: money(x[2]), items: mkCards(x[0]) }));
 
   let rows = T.rows;
-  if (s.fAccounts.length) rows = rows.filter(t => s.fAccounts.indexOf(t.account_id) >= 0);
+  // An internal transfer touches two accounts (account_id the source,
+  // to_account_id the destination), but is stored as one row. Matching only
+  // account_id hid every transfer from the receiving account's own filtered
+  // view. Matching either side means a transfer between two accounts that
+  // are BOTH selected still appears once, not twice — rows is a flat list
+  // of transactions, one entry per id, so an OR condition can only ever
+  // include or exclude a row, never duplicate it.
+  if (s.fAccounts.length) rows = rows.filter(t => s.fAccounts.indexOf(t.account_id) >= 0 || (t.to_account_id != null && s.fAccounts.indexOf(t.to_account_id) >= 0));
   if (s.fTypes.length) rows = rows.filter(t => s.fTypes.indexOf(t.type) >= 0);
   if (s.fCats.length) rows = rows.filter(t => t.category_id && s.fCats.indexOf(t.category_id) >= 0);
   const groups = [];
