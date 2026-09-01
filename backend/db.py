@@ -143,9 +143,25 @@ def _rebuild_recurring_amount_mode(conn):
 
 @contextmanager
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    # timeout is SQLite's busy_timeout: a connection that finds the database
+    # locked waits (retrying) instead of raising "database is locked"
+    # immediately, which BEGIN IMMEDIATE below now makes possible to hit
+    # routinely.
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Every request-scoped connection takes its write lock immediately,
+    # before its first SELECT, rather than SQLite's default of deferring
+    # it until the first write. Deferred acquisition let two concurrent
+    # requests both read recurring_rules.last_generated_date as "not yet
+    # generated" before either had written anything, so both then inserted
+    # the same due occurrence — generate_due() is called from most of the
+    # read endpoints the frontend fetches in parallel on every page load,
+    # so any day a rule became due was exactly wide enough a window to hit.
+    # BEGIN IMMEDIATE serializes them: the second connection blocks here
+    # until the first commits, then sees last_generated_date already
+    # updated and correctly generates nothing.
+    conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn
         conn.commit()
