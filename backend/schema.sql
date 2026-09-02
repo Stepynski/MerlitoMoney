@@ -1,3 +1,21 @@
+-- Server-side settings that don't belong to any one feature: the login
+-- password hash (seeded by auth.ensure_password_seeded, which also has its
+-- own CREATE TABLE IF NOT EXISTS for historical reasons — harmless, left
+-- alone) and, when not pinned by an environment variable, DB-stored Enable
+-- Banking credentials (enablebanking.py's load/save_credentials). Declared
+-- here so init_db() — which runs before ensure_password_seeded() at startup
+-- — guarantees the table exists rather than leaving it to a side effect of
+-- the auth path.
+--
+-- NEVER add "config" to BACKUP_TABLES in main.py: it holds the password hash
+-- and, potentially, an Enable Banking private key, and /api/backup/export
+-- writes those tables out as an unencrypted file the user is told to keep
+-- and share around.
+CREATE TABLE IF NOT EXISTS config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,

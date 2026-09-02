@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
@@ -743,6 +743,11 @@ def delete_recurring(recurring_id: int, request: Request):
 # backup without them would silently re-offer every transaction ever imported.
 # import_staging is deliberately absent — it holds unreviewed bank data that is
 # meaningless once the accounts around it have been replaced.
+#
+# "config" must NEVER be added here, alphabetically tempting as that looks —
+# it holds the login password hash and, potentially, the Enable Banking
+# private key, and this export is an unencrypted file the user is told to
+# keep and share around. See the comment on the config table in schema.sql.
 BACKUP_TABLES = [
     "categories", "accounts", "recurring_rules", "transactions", "budgets",
     "bank_connections", "bank_feeds", "payee_rules", "import_ledger",
@@ -864,6 +869,9 @@ class BankFeedPatch(BaseModel):
 def list_bank_feeds(request: Request):
     require_auth(request)
     with get_conn() as conn:
+        # A lapsed consent must stop being reported as connected here too —
+        # this is what the Import page's header reads.
+        _mark_expired_connections(conn)
         feeds = rows_to_dicts(conn.execute("SELECT * FROM bank_feeds ORDER BY name, uuid").fetchall())
         connections = rows_to_dicts(conn.execute("SELECT * FROM bank_connections ORDER BY id").fetchall())
     return {"feeds": feeds, "connections": connections}
@@ -1016,24 +1024,126 @@ def cancel_import(request: Request):
 
 # ---------- bank connection (Enable Banking) ----------
 
+def _mark_expired_connections(conn):
+    """Flip a lapsed consent from 'active' to 'expired' before it is read.
+
+    Nothing else ever writes 'expired' even though it's a valid CHECK value —
+    without this, a consent that has simply run past its valid_until stays
+    'active' forever and the Import page keeps listing a dead bank as
+    connected. Called from every read path (status, feed list) rather than
+    from a background job, since there is no scheduler in this app and a
+    stale status only matters at the moment someone is looking at it.
+
+    valid_until is an ISO8601 string with a trailing "Z" (see
+    start_authorization/bank_callback, both of which write
+    datetime.utcnow()...isoformat() + "Z") — always naive UTC, so it's
+    compared directly against datetime.utcnow(), also naive UTC. A missing,
+    unparseable or otherwise malformed value is left untouched rather than
+    raising: an expiry we can't read is not evidence that it has passed.
+    """
+    now = datetime.utcnow()
+    rows = conn.execute(
+        "SELECT id, valid_until FROM bank_connections WHERE status = 'active' AND valid_until IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        raw = row["valid_until"] or ""
+        try:
+            valid_until = datetime.fromisoformat(raw[:-1] if raw.endswith("Z") else raw)
+        except ValueError:
+            continue
+        if valid_until < now:
+            conn.execute("UPDATE bank_connections SET status = 'expired' WHERE id = ?", (row["id"],))
+
+
+@app.get("/api/bank/config")
+def bank_config(request: Request):
+    """Everything the setup screen needs to render — never the key itself."""
+    require_auth(request)
+    return enablebanking.describe_config()
+
+
+class BankConfigIn(BaseModel):
+    # Both optional and independently settable, so the setup form can save
+    # the App ID and the key in either order, or one at a time — a user
+    # pasting the App ID first and fetching the key file a minute later
+    # should not have to redo the first step.
+    app_id: Optional[str] = None
+    key_pem: Optional[str] = None
+
+
+@app.put("/api/bank/config")
+def save_bank_config(body: BankConfigIn, request: Request):
+    require_auth(request)
+    try:
+        return enablebanking.save_credentials(app_id=body.app_id, key_pem=body.key_pem)
+    except enablebanking.BankConfigError as e:
+        # These messages are written in save_credentials/validate_key_pem
+        # specifically for the person looking at the setup form — that's the
+        # whole point of the exception type, so surface it verbatim.
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/bank/config")
+def delete_bank_config(request: Request):
+    require_auth(request)
+    enablebanking.clear_credentials()
+    return {"ok": True}
+
+
+@app.post("/api/bank/test")
+def test_bank_config(request: Request):
+    """Prove the configured App ID/key actually work against the bank.
+
+    test_credentials() never raises and already returns {"ok": False, ...}
+    on failure — that's a result for the UI to render, not a transport-level
+    error, so it comes back as a normal 200 either way.
+    """
+    require_auth(request)
+    return enablebanking.test_credentials()
+
+
 @app.get("/api/bank/status")
 def bank_status(request: Request):
     require_auth(request)
     with get_conn() as conn:
+        _mark_expired_connections(conn)
         connections = rows_to_dicts(
             conn.execute("SELECT * FROM bank_connections ORDER BY id DESC").fetchall()
         )
-    return {"configured": enablebanking.is_configured(), "redirect_url": enablebanking.redirect_url(),
-            "connections": connections}
+    # The redirect URL has to match, character for character, one registered
+    # on the Enable Banking side — and this app is the only thing that knows
+    # what it actually is (it depends on how this deployment is reached), so
+    # it's computed here rather than left for the user to work out by hand.
+    # request.base_url already ends in "/".
+    suggested_redirect_url = str(request.base_url) + "api/bank/callback"
+    configured_redirect_url = enablebanking.redirect_url()
+    return {
+        # Existing keys, unchanged shape — the frontend already reads these.
+        "configured": enablebanking.is_configured(),
+        "redirect_url": configured_redirect_url,
+        "connections": connections,
+        # New: what the setup UI needs to show/validate the configuration.
+        "config": enablebanking.describe_config(),
+        "suggested_redirect_url": suggested_redirect_url,
+        # A mismatch here fails late and opaquely — at the bank's redirect,
+        # not at setup time — so it's worth flagging proactively. Only
+        # meaningful once something is actually configured; an empty
+        # configured_redirect_url isn't a "mismatch", it's just not set up.
+        "redirect_url_mismatch": bool(configured_redirect_url) and configured_redirect_url != suggested_redirect_url,
+    }
 
 
 @app.get("/api/bank/aspsps")
-def bank_aspsps(request: Request, country: Optional[str] = None):
+def bank_aspsps(request: Request, country: Optional[str] = None, include_sandbox: bool = False):
     require_auth(request)
     try:
-        return enablebanking.list_aspsps(country)
+        return enablebanking.list_aspsps(country, include_sandbox=include_sandbox)
     except (enablebanking.BankConfigError, enablebanking.BankApiError) as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        # This is the first authenticated call the setup flow makes, so it is
+        # where a wrong App ID or a mismatched key surfaces first — and the
+        # raw upstream text is 400 characters of JSON. friendly_error falls
+        # back to that text whenever it recognises nothing, so nothing is lost.
+        raise HTTPException(status_code=502, detail=enablebanking.friendly_error(e))
 
 
 class BankConnectIn(BaseModel):
@@ -1048,7 +1158,11 @@ def bank_connect(body: BankConnectIn, request: Request):
     try:
         auth = enablebanking.start_authorization(body.aspsp_name, body.country, state)
     except (enablebanking.BankConfigError, enablebanking.BankApiError) as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        # A redirect URL that is not registered on the Enable Banking side is
+        # rejected here, at /auth — the one misconfiguration whose raw error
+        # is least self-explanatory, and the one friendly_error works hardest
+        # to name.
+        raise HTTPException(status_code=502, detail=enablebanking.friendly_error(e))
     with get_conn() as conn:
         # Only one authorisation can be in flight — the session holds a single
         # state — so any earlier pending row is an attempt that was abandoned
@@ -1075,11 +1189,49 @@ def bank_connect(body: BankConnectIn, request: Request):
     return {"url": auth["url"]}
 
 
+# A minimal, dependency-free page for the one callback path that can't
+# assume a live session — see bank_callback's docstring. Plain inline styles
+# only: this is served straight from the API, with no access to the
+# frontend's own stylesheet or build.
+_LOST_SESSION_HTML = """<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MerlitoMoney</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 15vh auto 0; padding: 0 24px; color: #1a1a1a; line-height: 1.5;">
+<h1 style="font-size: 20px; margin-bottom: 8px;">Your session was lost</h1>
+<p>The bank sent your browser back here, but it no longer has a MerlitoMoney
+login session attached — this happens when the bank opens its authorisation
+page in a different browser, or a fresh in-app browser window (common on a
+phone).</p>
+<p><strong>The bank authorisation itself may well have gone through.</strong>
+Log back in to MerlitoMoney and check the Import page — if the bank shows up
+as connected, there's nothing else to do here.</p>
+<p style="margin-top: 24px;">
+<a href="/" style="display: inline-block; padding: 10px 20px; background: #2f6fd0; color: #fff; text-decoration: none; border-radius: 6px;">Back to MerlitoMoney</a>
+</p>
+</body>
+</html>"""
+
+
 @app.get("/api/bank/callback")
 def bank_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None,
                   error: Optional[str] = None):
-    """Where the bank sends the browser back after authorisation."""
-    require_auth(request)
+    """Where the bank sends the browser back after authorisation.
+
+    Unlike every other route, this one cannot start with require_auth(request)
+    and let a missing session raise: the bank's redirect can genuinely land
+    without the app's session cookie attached (a different browser, or a
+    fresh in-app browser opened just for the authorisation), and a bare JSON
+    401 would strand the user with no way back and no idea whether the bank
+    side actually worked. So a missing session degrades to a small HTML page
+    instead of an exception.
+    """
+    if not request.session.get("authed"):
+        return HTMLResponse(_LOST_SESSION_HTML)
+
     expected = request.session.pop("bank_state", None)
     origin = request.session.pop("bank_return_origin", None) or ""
 
@@ -1093,7 +1245,12 @@ def bank_callback(request: Request, code: Optional[str] = None, state: Optional[
     try:
         session = enablebanking.create_session(code)
     except (enablebanking.BankConfigError, enablebanking.BankApiError) as e:
-        return back_to("bank_error=" + str(e)[:120])
+        # A failed exchange must not leave the 'pending' row behind — left
+        # alone it would look like an authorisation still in flight forever,
+        # and could confuse the next /api/bank/connect's own pending cleanup.
+        with get_conn() as conn:
+            conn.execute("DELETE FROM bank_connections WHERE status = 'pending'")
+        return back_to("bank_error=" + enablebanking.friendly_error(e)[:120])
 
     with get_conn() as conn:
         row = conn.execute(
@@ -1133,6 +1290,32 @@ def bank_callback(request: Request, code: Optional[str] = None, state: Optional[
                 (acc["uid"], connection_id, inherited, acc.get("iban"), acc.get("name"), acc.get("currency")),
             )
     return back_to("bank_connected=1")
+
+
+@app.delete("/api/bank/connections/{connection_id}")
+def disconnect_bank_connection(connection_id: int, request: Request):
+    """Disconnect a bank: stop it syncing, without erasing what it taught us.
+
+    Deliberately does NOT cascade into bank_feeds or import_ledger:
+    bank_feeds carries the bank-account -> app-account mapping (the schema
+    comment on that table is explicit that losing it "made a previous
+    implementation unable to recognise its own imports"), and import_ledger
+    is the permanent record of every decision ever made about a bank
+    transaction — delete that and previously-skipped rows get re-offered
+    forever the next time this same bank is reconnected. So disconnecting
+    only marks the connection 'revoked' and turns off sync_enabled on the
+    feeds that pointed at it; the mapping and the decision history both
+    survive untouched, ready to be picked back up if the same bank is
+    reconnected later.
+    """
+    require_auth(request)
+    with get_conn() as conn:
+        row = conn.execute("SELECT id FROM bank_connections WHERE id = ?", (connection_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No such connection")
+        conn.execute("UPDATE bank_connections SET status = 'revoked' WHERE id = ?", (connection_id,))
+        conn.execute("UPDATE bank_feeds SET sync_enabled = 0 WHERE connection_id = ?", (connection_id,))
+    return {"ok": True}
 
 
 class BankSyncIn(BaseModel):
