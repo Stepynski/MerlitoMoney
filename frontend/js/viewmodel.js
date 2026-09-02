@@ -1,11 +1,11 @@
 import { state } from './state.js';
 import { TH, ACCENT, GREY } from './theme-runtime.js';
-import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS, APP_VERSION, localDateStr } from './constants.js';
+import { RED, GREEN, PAL, ICONS, MONTHS, M3, DAYS, APP_VERSION, localDateStr, COUNTRY_NAMES, FALLBACK_COUNTRIES } from './constants.js';
 import { render } from './render.js';
 import {
   reopenAccount, toggleNetWorthAction, openAboutModal,
   decideStaged, setStagedField, mapFeedAction, toggleFeedSyncAction,
-  connectBankAction, loadAspsps
+  connectBankAction, disconnectBankConnectionAction
 } from './actions.js';
 
 // ---------- helpers ported from the design ----------
@@ -205,7 +205,8 @@ export function openModal(kind, editId, form) {
     loanDay: '1', loanWeekendRule: 'none',
     extraPaymentAmount: '', extraPaymentDate: localDateStr(), extraPaymentRuleId: '',
     extraPaymentFrom: (state.accounts.find(x => x.grp === 'spend') || {}).id || '',
-    backupFileData: null, backupFileName: '', backupPassword: '', backupConfirm: ''
+    backupFileData: null, backupFileName: '', backupPassword: '', backupConfirm: '',
+    bankAppId: '', bankKeyFileName: ''
   }, form || {});
   render();
 }
@@ -763,7 +764,9 @@ export function computeView() {
     data: ['Data', ''],
     backups: ['Backups', ''],
     about: ['About', ''],
-    connectBank: ['Connect a bank', '']
+    connectBank: ['Connect a bank', ''],
+    bankSetup: ['Bank import', ''],
+    disconnectBank: ['Disconnect bank', '']
   }[s.modal] || ['', ''];
   // ---------- bank import review ----------
   const importAccountOptions = [{ v: '', l: 'Not linked' }]
@@ -836,17 +839,43 @@ export function computeView() {
     };
   });
 
-  const bankConnections = (s.bank.connections || []).filter(c => c.status === 'active').map(c => {
+  // A 'pending' row is a connection attempt still in flight (or abandoned
+  // partway through — /api/bank/connect deletes any earlier one before
+  // starting a new attempt) and never has anything useful to show or act on,
+  // so it's the only status filtered out here. Active, expired and revoked
+  // connections are all shown — this list is also where Disconnect/Reconnect
+  // live, not just the "connected" summary the Import page used to reduce it to.
+  const bankConnections = (s.bank.connections || []).filter(c => c.status !== 'pending').map(c => {
     const until = c.valid_until ? new Date(c.valid_until) : null;
     const daysLeft = until ? Math.ceil((until - new Date()) / 86400000) : null;
+    const isActive = c.status === 'active';
+    const expiringSoon = isActive && daysLeft !== null && daysLeft <= 7;
     return {
-      name: c.aspsp_name, country: c.aspsp_country,
+      id: c.id, name: c.aspsp_name, country: c.aspsp_country,
+      statusLabel: c.status === 'active' ? 'Connected' : c.status === 'expired' ? 'Expired' : c.status === 'revoked' ? 'Disconnected' : c.status,
       // A consent lapses after about 90 days and the bank then refuses to
       // answer, so the countdown is shown before it bites rather than after.
-      expiry: daysLeft === null ? '' : daysLeft > 0 ? `access expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : 'access has expired — reconnect',
-      expiring: daysLeft !== null && daysLeft <= 7
+      expiry: isActive && daysLeft !== null ? (daysLeft > 0 ? `access expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}` : 'access has expired') : '',
+      expiring: expiringSoon,
+      canDisconnect: isActive,
+      // Offered once a consent is gone or close to it — reconnecting just
+      // re-runs the normal connect flow pre-aimed at the same bank/country.
+      canReconnect: !isActive || expiringSoon,
+      onDisconnect: () => openModal('disconnectBank', c.id),
+      onReconnect: () => connectBankAction(c.aspsp_name, c.aspsp_country)
     };
   });
+
+  // config is only absent before the very first /api/bank/status response
+  // lands (see state.js's fallback) — {} keeps every read below undefined
+  // instead of throwing.
+  const bankConfig = s.bank.config || {};
+  const activeBankConnections = bankConnections.filter(c => c.statusLabel === 'Connected');
+  const bankStatusLabel = !bankConfig.configured
+    ? 'Not configured'
+    : activeBankConnections.length
+      ? activeBankConnections.length + ' bank' + (activeBankConnections.length === 1 ? '' : 's') + ' connected'
+      : 'Configured — no bank connected yet';
 
   const stagedPending = s.staged.filter(r => r.decision === 'pending').length;
   const stagedReady = s.staged.filter(r => r.decision !== 'pending').length;
@@ -856,6 +885,7 @@ export function computeView() {
   const deleteRecurringTarget = s.modal === 'deleteRecurring' ? s.recurring.find(r => r.id === s.editId) : null;
   const deleteMovementTarget = s.modal === 'deleteMovement' ? s.tx.find(t => t.id === s.editId) : null;
   const extraPaymentTarget = s.modal === 'extraPayment' ? acct(s.editId) : null;
+  const disconnectBankTarget = s.modal === 'disconnectBank' ? bankConnections.find(c => c.id === s.editId) : null;
 
   return {
     isNarrow: s.narrow, isWide: !s.narrow,
@@ -882,12 +912,51 @@ export function computeView() {
     isConnectBankModal: s.modal === 'connectBank',
     aspspLoading: s.aspspLoading,
     aspspCountry: s.aspspCountry,
-    aspspCountryOptions: [['NL', 'Netherlands'], ['IT', 'Italy'], ['DE', 'Germany'], ['BE', 'Belgium'], ['FR', 'France'], ['ES', 'Spain']],
-    onAspspCountry: e => { s.aspspCountry = e.target.value; loadAspsps(); },
-    aspspList: s.aspsps.map(b => ({
-      name: b.name, country: b.country,
-      onClick: () => connectBankAction(b.name, b.country)
-    })),
+    // s.aspsps is the *unfiltered* full list (see loadAspspList in
+    // actions.js) — country options and the visible bank list are both
+    // derived from it here so switching country or the sandbox checkbox
+    // never needs another round trip. Falls back to a hardcoded EU shortlist
+    // when nothing has been fetched yet (not configured, or the fetch failed).
+    aspspCountryOptions: (() => {
+      const countries = Array.from(new Set(s.aspsps.map(b => b.country).filter(Boolean))).sort();
+      return countries.length ? countries.map(c => [c, COUNTRY_NAMES[c] || c]) : FALLBACK_COUNTRIES;
+    })(),
+    onAspspCountry: e => { s.aspspCountry = e.target.value; render(); },
+    aspspIncludeSandbox: s.aspspIncludeSandbox,
+    onAspspSandbox: e => { s.aspspIncludeSandbox = e.target.checked; render(); },
+    aspspList: s.aspsps
+      .filter(b => b.country === s.aspspCountry && (s.aspspIncludeSandbox || !b.sandbox))
+      .map(b => ({
+        name: b.name, country: b.country, sandbox: !!b.sandbox,
+        onClick: () => connectBankAction(b.name, b.country)
+      })),
+    bankStatusLabel,
+    isBankSetupModal: s.modal === 'bankSetup',
+    bankAppIdLocked: bankConfig.app_id_source === 'env',
+    bankKeyLocked: bankConfig.key_source === 'env',
+    bankEnvLocked: !!bankConfig.env_locked,
+    bankConfigAppId: bankConfig.app_id || '',
+    bankKeyPresent: !!bankConfig.key_present,
+    bankKeyFingerprint: bankConfig.key_fingerprint || '',
+    bankKeyUpdatedAt: bankConfig.key_updated_at ? dm(new Date(bankConfig.key_updated_at)) : '',
+    // Only true when there is something in the DB that "Clear stored
+    // credentials" would actually remove — an env-pinned value can't be
+    // cleared from here (save_credentials()/clear_credentials() never touch
+    // the environment), so the button would otherwise look like it did
+    // something when it silently changed nothing.
+    bankHasDbCreds: (bankConfig.app_id_source === 'db' && !!bankConfig.app_id) || (bankConfig.key_source === 'db' && !!bankConfig.key_present),
+    bankSuggestedRedirectUrl: s.bank.suggested_redirect_url || '',
+    bankConfiguredRedirectUrl: s.bank.redirect_url || '',
+    bankRedirectMismatch: !!s.bank.redirect_url_mismatch,
+    bankCopyFeedback: s.bankCopyFeedback,
+    bankConfigBusy: s.bankConfigBusy,
+    bankTest: s.bankTest,
+    bankTestBusy: s.bankTestBusy,
+    formBankAppId: s.form.bankAppId,
+    formBankKeyFileName: s.form.bankKeyFileName,
+    isDisconnectBankModal: s.modal === 'disconnectBank',
+    disconnectBankName: disconnectBankTarget ? disconnectBankTarget.name : '',
+    onDisconnectBank: () => disconnectBankConnectionAction(),
     showRecurringTab: s.page === 'balance' && s.balanceTab === 'recurring',
     balanceTabs: [['movements', 'Movements'], ['recurring', 'Recurring']].map(t => {
       const on = s.balanceTab === t[0];

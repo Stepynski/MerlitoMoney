@@ -360,10 +360,22 @@ export async function syncBankAction() {
   render();
 }
 
-export async function loadAspsps() {
+export async function loadAspspList() {
+  // Fetched once, unfiltered (every country, sandbox included) — the
+  // country picker and the sandbox checkbox both filter this client-side in
+  // the view model, which is what removes the round-trip that used to fire
+  // on every country change. include_sandbox=true is safe to always ask
+  // for: each bank comes back tagged with its own `sandbox` flag, so hiding
+  // sandbox entries by default is still a pure client-side filter.
+  if (!state.bank.configured) { state.aspsps = []; return; }
   state.aspspLoading = true; render();
   try {
-    state.aspsps = await api('/api/bank/aspsps?country=' + encodeURIComponent(state.aspspCountry));
+    state.aspsps = await api('/api/bank/aspsps?include_sandbox=true');
+    const countries = Array.from(new Set(state.aspsps.map(b => b.country))).sort();
+    // The default 'NL' (or whatever was last picked) may not exist for this
+    // deployment's credentials — falling back to the first real country
+    // avoids landing on a selection with an empty bank list under it.
+    if (countries.length && countries.indexOf(state.aspspCountry) < 0) state.aspspCountry = countries[0];
   } catch (e) {
     state.aspsps = [];
     try { state.formError = JSON.parse(e.message).detail; } catch (_) { state.formError = 'Could not list banks'; }
@@ -375,7 +387,7 @@ export async function loadAspsps() {
 export function openConnectBank() {
   state.aspsps = []; state.formError = '';
   openModal('connectBank');
-  loadAspsps();
+  loadAspspList();
 }
 
 export async function connectBankAction(name, country) {
@@ -430,4 +442,102 @@ export function openAboutModal() {
   state.swInfo = null;
   openModal('about');
   refreshSwStatus();
+}
+
+// ---------- bank import setup wizard ----------
+
+export function openBankSetup() {
+  state.bankTest = null; state.bankCopyFeedback = '';
+  openModal('bankSetup', null, {
+    // The App ID isn't secret (unlike the key) — config.app_id already comes
+    // back from the server, so pre-filling it lets "edit the App ID" work
+    // without retyping it from scratch.
+    bankAppId: (state.bank.config && state.bank.config.app_id) || '',
+    bankKeyFileName: ''
+  });
+}
+
+export async function copyRedirectUrl(url) {
+  try {
+    await navigator.clipboard.writeText(url);
+    state.bankCopyFeedback = 'Copied to clipboard.';
+  } catch (e) {
+    // Clipboard access can be denied (no HTTPS, no permission, older
+    // browser) — the field itself is still selectable, so this degrades to
+    // "copy it yourself" instead of silently doing nothing.
+    state.bankCopyFeedback = 'Could not copy automatically — select the text and copy it by hand.';
+  }
+  render();
+}
+
+export async function saveBankAppId() {
+  const appId = state.form.bankAppId.trim();
+  if (!appId) { state.formError = 'Enter an Application ID'; render(); return; }
+  state.bankConfigBusy = true; state.formError = ''; render();
+  try {
+    const cfg = await api('/api/bank/config', { method: 'PUT', body: JSON.stringify({ app_id: appId }) });
+    state.bank.config = cfg;
+    state.bank.configured = cfg.configured;
+  } catch (e) {
+    try { state.formError = JSON.parse(e.message).detail; } catch (_) { state.formError = 'Could not save the Application ID'; }
+  }
+  state.bankConfigBusy = false;
+  render();
+}
+
+// Reads the .pem in the browser and PUTs its text straight to the server —
+// same pattern as pickBackupFile, except the file's content is never kept:
+// it lives only in this closure for the duration of the upload and is
+// discarded the moment the request settles. Only the filename is kept, for
+// display, and even that is thrown away by clearBankConfigAction/openBankSetup.
+export function pickBankKeyFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const keyPem = reader.result;
+    state.bankConfigBusy = true; state.formError = ''; render();
+    try {
+      const cfg = await api('/api/bank/config', { method: 'PUT', body: JSON.stringify({ key_pem: keyPem }) });
+      state.bank.config = cfg;
+      state.bank.configured = cfg.configured;
+      state.form.bankKeyFileName = file.name;
+    } catch (e) {
+      try { state.formError = JSON.parse(e.message).detail; } catch (_) { state.formError = 'Could not save the private key'; }
+    }
+    state.bankConfigBusy = false;
+    render();
+  };
+  reader.readAsText(file);
+}
+
+export async function clearBankConfigAction() {
+  state.bankConfigBusy = true; render();
+  try {
+    await api('/api/bank/config', { method: 'DELETE' });
+  } catch (e) { /* best-effort — loadAll() below still reflects reality either way */ }
+  state.form.bankAppId = ''; state.form.bankKeyFileName = ''; state.bankTest = null;
+  await loadAll();
+  state.bankConfigBusy = false;
+  render();
+}
+
+export async function testBankConnectionAction() {
+  state.bankTestBusy = true; state.bankTest = null; render();
+  try {
+    // /api/bank/test always answers 200 with {ok, message, ...} — a thrown
+    // error here means the request itself failed (network, session), not
+    // that the bank test failed, so it gets its own generic verdict.
+    state.bankTest = await api('/api/bank/test', { method: 'POST' });
+  } catch (e) {
+    state.bankTest = { ok: false, message: 'Could not reach the server to run the test.' };
+  }
+  state.bankTestBusy = false;
+  render();
+}
+
+export async function disconnectBankConnectionAction() {
+  await api('/api/bank/connections/' + state.editId, { method: 'DELETE' });
+  state.modal = null;
+  await loadAll();
+  render();
 }

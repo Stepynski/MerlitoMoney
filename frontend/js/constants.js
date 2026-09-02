@@ -15,6 +15,22 @@ export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', '
 export const M3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const DAYS = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 
+// Labels for the country codes /api/bank/aspsps can return (Enable Banking
+// covers the EEA + UK + CH). Only used to make the connect-bank country
+// picker readable — an unrecognised code still works, it just falls back to
+// showing the bare ISO code as its own label.
+export const COUNTRY_NAMES = {
+  AT: 'Austria', BE: 'Belgium', BG: 'Bulgaria', HR: 'Croatia', CY: 'Cyprus', CZ: 'Czechia',
+  DK: 'Denmark', EE: 'Estonia', FI: 'Finland', FR: 'France', DE: 'Germany', GR: 'Greece',
+  HU: 'Hungary', IS: 'Iceland', IE: 'Ireland', IT: 'Italy', LV: 'Latvia', LI: 'Liechtenstein',
+  LT: 'Lithuania', LU: 'Luxembourg', MT: 'Malta', NL: 'Netherlands', NO: 'Norway', PL: 'Poland',
+  PT: 'Portugal', RO: 'Romania', SK: 'Slovakia', SI: 'Slovenia', ES: 'Spain', SE: 'Sweden',
+  GB: 'United Kingdom', CH: 'Switzerland'
+};
+// Shown only when the ASPSP list can't be fetched yet (nothing configured,
+// or the credentials don't work) so the country picker is never empty.
+export const FALLBACK_COUNTRIES = [['NL', 'Netherlands'], ['IT', 'Italy'], ['DE', 'Germany'], ['BE', 'Belgium'], ['FR', 'France'], ['ES', 'Spain']];
+
 // today's date as YYYY-MM-DD in the browser's own timezone. Date.toISOString()
 // is UTC, so anything entered between midnight and 1-2am local (UTC+1/+2) would
 // otherwise be stamped with yesterday's date.

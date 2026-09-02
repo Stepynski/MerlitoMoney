@@ -34,6 +34,6 @@ export async function loadAll() {
   state.feeds = feeds && Array.isArray(feeds.feeds) ? feeds.feeds : [];
   state.connections = feeds && Array.isArray(feeds.connections) ? feeds.connections : [];
   state.bank = bank && typeof bank === 'object' && 'configured' in bank
-    ? bank : { configured: false, connections: [], redirect_url: '' };
+    ? bank : { configured: false, connections: [], redirect_url: '', config: null, suggested_redirect_url: '', redirect_url_mismatch: false };
   if (!state.form.account && accounts.length) state.form.account = accounts[0].id;
 }

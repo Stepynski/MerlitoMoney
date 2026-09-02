@@ -2,9 +2,9 @@ import { state } from './state.js';
 import { TH, ACCENT, GREY, applyTheme } from './theme-runtime.js';
 import { THEME_STYLES, THEMES } from './themes.js';
 import { saveThemePref } from './state.js';
-import { RED } from './constants.js';
+import { RED, GREEN } from './constants.js';
 import { computeView, set, openModal, shiftPeriod, unbudgeted } from './viewmodel.js';
-import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction, downloadTransactionsCsv, downloadBackup, pickBackupFile, restoreBackupAction, openAboutModal, commitImportAction, cancelImportAction, syncBankAction, openConnectBank } from './actions.js';
+import { submit, deleteCategoryAction, removeBudgetAction, closeAccountAction, deleteAccountAction, pauseRecurringAction, resumeRecurringAction, deleteRecurringAction, deleteMovementAction, deleteAllDataAction, changePasswordAction, logoutAction, downloadTransactionsCsv, downloadBackup, pickBackupFile, restoreBackupAction, openAboutModal, commitImportAction, cancelImportAction, syncBankAction, openConnectBank, openBankSetup, copyRedirectUrl, saveBankAppId, pickBankKeyFile, clearBankConfigAction, testBankConnectionAction } from './actions.js';
 
 // ---------- event delegation ----------
 export let handlers = [];
@@ -114,6 +114,8 @@ export function render() {
   if (backupPwInput) backupPwInput.addEventListener('input', e => set('backupPassword', e.target.value));
   const backupConfirmInput = root.querySelector('#f-backup-confirm');
   if (backupConfirmInput) backupConfirmInput.addEventListener('input', e => set('backupConfirm', e.target.value));
+  const bankAppIdInput = root.querySelector('#f-bank-app-id');
+  if (bankAppIdInput) bankAppIdInput.addEventListener('input', e => set('bankAppId', e.target.value));
   const pwInput = root.querySelector('#f-password');
   if (pwInput) pwInput.focus();
 }
@@ -624,29 +626,41 @@ export function renderApp() {
           <div style="flex:1;min-width:170px">
             <div style="font-weight:700;font-size:16px">Fetch from your bank</div>
             <div style="font-size:12.5px;color:${GREY}">
-              ${!V.bankConfigured
-                ? 'No bank credentials configured on the server yet.'
-                : V.bankConnections.length
-                  ? V.bankConnections.map(c => esc(c.name)).join(', ')
-                  : 'No bank connected yet.'}
+              ${!V.bankConfigured ? 'Bank import needs a one-time setup with your Enable Banking application.' : V.bankStatusLabel}
             </div>
           </div>
-          <select data-change="${H(e => { state.syncDays = e.target.value; render(); })}" style="border:1px solid ${TH.border};border-radius:10px;padding:8px 10px;background:${TH.surface};cursor:pointer;font-size:13.5px">
-            ${V.syncDayOptions.map(o => `<option value="${o[0]}" ${o[0] === V.syncDays ? 'selected' : ''}>${o[1]}</option>`).join('')}
-          </select>
-          <button data-click="${H(() => openConnectBank())}" ${V.bankConfigured ? '' : 'disabled'} style="border:1px solid ${TH.border};background:transparent;border-radius:12px;padding:9px 15px;cursor:${V.bankConfigured ? 'pointer' : 'default'};font-weight:600;font-size:13.5px;color:${V.bankConfigured ? TH.text : GREY}">Connect a bank</button>
-          <button data-click="${H(() => syncBankAction())}" ${V.importBusy || !V.bankConnections.length ? 'disabled' : ''} style="border:0;background:${V.bankConnections.length ? ACCENT : TH.border};color:#fff;border-radius:12px;padding:10px 17px;cursor:${V.bankConnections.length ? 'pointer' : 'default'};font-weight:600;font-size:13.5px">${V.importBusy ? 'Fetching…' : 'Fetch now'}</button>
+          ${V.bankConfigured ? `
+            <select data-change="${H(e => { state.syncDays = e.target.value; render(); })}" style="border:1px solid ${TH.border};border-radius:10px;padding:8px 10px;background:${TH.surface};cursor:pointer;font-size:13.5px">
+              ${V.syncDayOptions.map(o => `<option value="${o[0]}" ${o[0] === V.syncDays ? 'selected' : ''}>${o[1]}</option>`).join('')}
+            </select>
+            <button data-click="${H(() => openConnectBank())}" style="border:1px solid ${TH.border};background:transparent;border-radius:12px;padding:9px 15px;cursor:pointer;font-weight:600;font-size:13.5px;color:${TH.text}">Connect a bank</button>
+            <button data-click="${H(() => syncBankAction())}" ${V.importBusy || !V.bankConnections.length ? 'disabled' : ''} style="border:0;background:${V.bankConnections.length ? ACCENT : TH.border};color:#fff;border-radius:12px;padding:10px 17px;cursor:${V.bankConnections.length ? 'pointer' : 'default'};font-weight:600;font-size:13.5px">${V.importBusy ? 'Fetching…' : 'Fetch now'}</button>
+          ` : `
+            <button data-click="${H(() => openBankSetup())}" style="border:0;background:${ACCENT};color:#fff;border-radius:12px;padding:10px 17px;cursor:pointer;font-weight:600;font-size:13.5px">Set up bank import</button>
+          `}
         </div>
-        ${V.bankConnections.filter(c => c.expiring).map(c => `
-          <div style="font-size:12.5px;color:${RED};background:${RED}0f;border-radius:10px;padding:8px 10px">${esc(c.name)}: ${esc(c.expiry)}</div>`).join('')}
+        ${V.bankConnections.length ? `
+          <div style="display:flex;flex-direction:column">
+            ${V.bankConnections.map(c => `
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid ${TH.border}">
+                <div style="flex:1;min-width:140px">
+                  <div style="font-weight:600;font-size:13.5px">${esc(c.name)} <span style="font-weight:400;color:${GREY}">· ${esc(c.country)}</span></div>
+                  <div style="font-size:12px;color:${c.expiring ? RED : GREY}">${esc(c.statusLabel)}${c.expiry ? ' · ' + esc(c.expiry) : ''}</div>
+                </div>
+                ${c.canReconnect ? `<button data-click="${H(c.onReconnect)}" style="border:1px solid ${TH.border};background:transparent;color:${ACCENT};border-radius:10px;padding:7px 12px;cursor:pointer;font-weight:600;font-size:12.5px">Reconnect</button>` : ''}
+                ${c.canDisconnect ? `<button data-click="${H(c.onDisconnect)}" style="border:1px solid ${TH.border};background:transparent;color:${RED};border-radius:10px;padding:7px 12px;cursor:pointer;font-weight:600;font-size:12.5px">Disconnect</button>` : ''}
+              </div>`).join('')}
+          </div>` : ''}
       </section>
 
       <section style="background:${TH.surface};border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,0.06)">
         <div style="font-weight:700;font-size:16px;margin-bottom:4px">Bank accounts</div>
         <div style="font-size:13px;color:${GREY};line-height:1.5;margin-bottom:${V.noFeeds ? '0' : '14px'}">
-          ${V.noFeeds
-            ? 'No bank is connected yet. Once a bank is linked, each account it reports shows up here to be matched with one of your own accounts.'
-            : 'Each account your bank reports has to point at one of your own accounts before its transactions can be reviewed.'}
+          ${!V.bankConfigured
+            ? 'No bank is connected yet — set up bank import above to get started.'
+            : V.noFeeds
+              ? 'No bank is connected yet. Once a bank is linked, each account it reports shows up here to be matched with one of your own accounts.'
+              : 'Each account your bank reports has to point at one of your own accounts before its transactions can be reviewed.'}
         </div>
         ${V.importFeeds.map(f => `
           <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid ${TH.border};flex-wrap:wrap">
@@ -772,7 +786,7 @@ export function renderApp() {
         <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;position:sticky;top:0;background:${TH.surface2};z-index:2">
           <button data-click="${H(() => { state.modal = null; render(); })}" style="border:0;background:transparent;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none"><svg width="20" height="20"><use href="#ic-close"></use></svg></button>
           <span style="font-size:19px;font-weight:700;flex:1">${V.modalTitle}</span>
-          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal || V.isDeleteMovementModal || V.isDeleteAllDataModal || V.isChangePasswordModal || V.isDataModal || V.isBackupsModal || V.isAboutModal || V.isConnectBankModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
+          ${V.isSettingsModal || V.isDeleteAccountModal || V.isDeleteRecurringModal || V.isDeleteMovementModal || V.isDeleteAllDataModal || V.isChangePasswordModal || V.isDataModal || V.isBackupsModal || V.isAboutModal || V.isConnectBankModal || V.isBankSetupModal || V.isDisconnectBankModal ? '' : `<button data-click="${H(() => submit())}" style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:9px 16px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px">${V.modalCta}</button>`}
         </div>
         <div style="padding:0 18px 20px;display:flex;flex-direction:column;gap:14px">
           ${V.isDeleteAccountModal ? `
@@ -1115,6 +1129,16 @@ export function renderApp() {
                 <svg width="20" height="20" style="color:${GREY}"><use href="#ic-info"></use></svg>About
               </button>
             </div>
+            <span style="font-size:12px;font-weight:600;color:${TH.textFaint};text-transform:uppercase;letter-spacing:0.06em;padding:2px 2px 0">Bank import</span>
+            <div style="background:${TH.surface};border-radius:14px;overflow:hidden">
+              <button data-click="${H(() => openBankSetup())}" style="width:100%;border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${TH.text}">
+                <svg width="20" height="20" style="color:${GREY}"><use href="#ic-bank"></use></svg>
+                <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
+                  <span>Bank import</span>
+                  <span style="font-size:12px;color:${GREY};font-weight:400">${esc(V.bankStatusLabel)}</span>
+                </span>
+              </button>
+            </div>
             <span style="font-size:12px;font-weight:600;color:${RED};text-transform:uppercase;letter-spacing:0.06em;padding:2px 2px 0">Danger zone</span>
             <div style="background:${TH.surface};border-radius:14px;overflow:hidden">
               <button data-click="${H(() => openModal('deleteAllData', null, { dangerPassword: '', dangerConfirm: '' }))}" style="border:0;background:transparent;text-align:left;padding:15px 16px;display:flex;align-items:center;gap:14px;cursor:pointer;font-size:15px;color:${RED}">
@@ -1200,6 +1224,10 @@ export function renderApp() {
                   ${V.aspspCountryOptions.map(o => `<option value="${o[0]}" ${o[0] === V.aspspCountry ? 'selected' : ''}>${o[1]}</option>`).join('')}
                 </select>
               </label>
+              <label style="display:flex;align-items:center;gap:9px;cursor:pointer">
+                <input type="checkbox" data-change="${H(V.onAspspSandbox)}" ${V.aspspIncludeSandbox ? 'checked' : ''} style="width:16px;height:16px;cursor:pointer">
+                <span style="font-size:13px;color:${GREY}">Include sandbox banks (fake test banks, not real accounts)</span>
+              </label>
               ${V.formError ? `<div style="font-size:13px;color:${RED}">${esc(V.formError)}</div>` : ''}
               ${V.aspspLoading
                 ? `<div style="padding:20px;text-align:center;color:${GREY};font-size:13.5px">Loading banks…</div>`
@@ -1209,6 +1237,95 @@ export function renderApp() {
                         <button data-click="${H(b.onClick)}" style="border:0;border-bottom:1px solid ${TH.border};background:transparent;text-align:left;padding:12px 4px;cursor:pointer;font-size:14.5px">${esc(b.name)}</button>`).join('')}
                     </div>`
                   : `<div style="padding:20px;text-align:center;color:${GREY};font-size:13.5px">No banks listed for this country.</div>`}
+            </div>` : ''}
+
+          ${V.isBankSetupModal ? `
+            <div style="display:flex;flex-direction:column;gap:20px">
+              ${V.bankEnvLocked ? `
+                <div style="font-size:12.5px;color:${GREY};background:${TH.surface};border-radius:10px;padding:10px 12px;line-height:1.5">
+                  Some of these values are pinned by an environment variable on the server and can't be changed here — each field below says so where it applies.
+                </div>` : ''}
+
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <span style="font-weight:700;font-size:14.5px">1. Create an Enable Banking application</span>
+                <p style="margin:0;font-size:13px;color:${GREY};line-height:1.55">
+                  MerlitoMoney talks to your bank through <a href="https://enablebanking.com" target="_blank" rel="noopener noreferrer" style="color:${ACCENT}">enablebanking.com</a> — create a free account there and register an application. When it asks for an environment, choose <strong style="color:${TH.text}">restricted production</strong>: it's free for personal use and only ever links accounts you authorise yourself. <strong style="color:${TH.text}">Sandbox</strong> looks similar but only ever talks to fake test banks, never your real one.
+                </p>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <span style="font-weight:700;font-size:14.5px">2. Register the redirect URL</span>
+                <p style="margin:0;font-size:13px;color:${GREY};line-height:1.55">
+                  On the application's page at Enable Banking, add the URL below as a redirect URL — it has to match <strong style="color:${TH.text}">character for character</strong>. A mismatch here isn't caught until your bank redirects back with an opaque error, so it's worth double-checking now rather than debugging it later.
+                </p>
+                <div style="display:flex;gap:8px;align-items:stretch">
+                  <input readonly value="${esc(V.bankSuggestedRedirectUrl)}" data-click="${H(e => e.target.select())}" style="flex:1;min-width:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;border:1px solid ${TH.border};border-radius:10px;padding:10px 11px;background:${TH.surface};color:${TH.text}">
+                  <button data-click="${H(() => copyRedirectUrl(V.bankSuggestedRedirectUrl))}" style="border:1px solid ${TH.border};background:${TH.surface};color:${TH.text};border-radius:10px;padding:0 14px;cursor:pointer;font-weight:600;font-size:12.5px;white-space:nowrap;flex:none">Copy</button>
+                </div>
+                ${V.bankCopyFeedback ? `<span style="font-size:12px;color:${GREY}">${esc(V.bankCopyFeedback)}</span>` : ''}
+                ${V.bankRedirectMismatch ? `
+                  <div style="border:1px solid ${RED}55;background:${RED}0f;border-radius:10px;padding:10px 11px;display:flex;flex-direction:column;gap:4px">
+                    <span style="font-size:12.5px;font-weight:600;color:${RED}">The redirect URL registered right now doesn't match this deployment</span>
+                    <span style="font-size:12px;color:${GREY}">Currently registered: <code style="font-family:ui-monospace,Menlo,Consolas,monospace">${esc(V.bankConfiguredRedirectUrl)}</code></span>
+                    <span style="font-size:12px;color:${GREY}">Expected by this deployment: <code style="font-family:ui-monospace,Menlo,Consolas,monospace">${esc(V.bankSuggestedRedirectUrl)}</code></span>
+                    <span style="font-size:12px;color:${GREY}">Update it at Enable Banking to the expected value — otherwise connecting a bank fails at the very last step, with an opaque error there.</span>
+                  </div>` : ''}
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <span style="font-weight:700;font-size:14.5px">3. Paste the Application ID</span>
+                ${V.bankAppIdLocked ? `
+                  <p style="margin:0;font-size:13px;color:${GREY};line-height:1.5">Set on the server via the <code>ENABLEBANKING_APP_ID</code> environment variable — change it there, not here.</p>
+                  <input value="${esc(V.bankConfigAppId)}" disabled style="border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface2};color:${GREY};font-size:14px">
+                ` : `
+                  <div style="display:flex;gap:8px">
+                    <input id="f-bank-app-id" value="${esc(V.formBankAppId)}" placeholder="Application ID from Enable Banking" style="flex:1;min-width:0;border:1px solid ${TH.border};border-radius:12px;padding:12px 13px;background:${TH.surface};font-size:14.5px;outline:none">
+                    <button data-click="${H(() => saveBankAppId())}" ${V.bankConfigBusy ? 'disabled' : ''} style="border:0;background:${TH.accentSoft};color:${ACCENT};border-radius:12px;padding:0 18px;cursor:pointer;font-weight:600;font-size:13.5px;flex:none">Save</button>
+                  </div>
+                  ${V.bankConfigAppId ? `<span style="font-size:12px;color:${GREY}">Currently saved: ${esc(V.bankConfigAppId)}</span>` : ''}
+                `}
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <span style="font-weight:700;font-size:14.5px">4. Upload the private key</span>
+                ${V.bankKeyLocked ? `
+                  <p style="margin:0;font-size:13px;color:${GREY};line-height:1.5">Set on the server via a key file — change it there, not here.</p>
+                ` : `
+                  <p style="margin:0;font-size:13px;color:${GREY};line-height:1.5">The private key (.pem) Enable Banking issued for this application. It's read in your browser and sent straight to the server — MerlitoMoney never shows it again, only its fingerprint below, to confirm which key is stored.</p>
+                  <input type="file" accept=".pem,application/x-pem-file,text/plain" id="f-bank-key-file" data-change="${H(e => pickBankKeyFile(e.target.files[0]))}" style="display:none">
+                  <label for="f-bank-key-file" style="border:1px solid ${TH.border};background:${TH.surface};color:${TH.text};border-radius:12px;padding:12px;cursor:pointer;font-weight:600;font-size:13.5px;display:flex;align-items:center;justify-content:center;gap:8px">
+                    <svg width="17" height="17"><use href="#ic-upload"></use></svg>${V.formBankKeyFileName ? 'Selected: ' + esc(V.formBankKeyFileName) : 'Choose private key file (.pem)…'}
+                  </label>
+                `}
+                ${V.bankKeyPresent ? `
+                  <div style="font-size:12px;color:${GREY};display:flex;flex-direction:column;gap:2px">
+                    <span>Key stored${V.bankKeyFingerprint ? ' · fingerprint ' + esc(V.bankKeyFingerprint) : ''}</span>
+                    ${V.bankKeyUpdatedAt ? `<span>Last changed ${esc(V.bankKeyUpdatedAt)}</span>` : ''}
+                  </div>` : ''}
+                ${V.bankHasDbCreds ? `
+                  <button data-click="${H(() => clearBankConfigAction())}" ${V.bankConfigBusy ? 'disabled' : ''} style="align-self:flex-start;border:0;background:transparent;color:${RED};cursor:pointer;font-weight:600;font-size:12.5px;padding:0">Clear stored credentials</button>` : ''}
+              </div>
+
+              ${V.formError ? `<span style="color:${RED};font-size:13px">${esc(V.formError)}</span>` : ''}
+
+              <div style="height:1px;background:${TH.border}"></div>
+
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <button data-click="${H(() => testBankConnectionAction())}" ${V.bankTestBusy ? 'disabled' : ''} style="border:0;background:${ACCENT};color:#fff;border-radius:12px;padding:13px;cursor:pointer;font-weight:600">${V.bankTestBusy ? 'Testing…' : 'Test connection'}</button>
+                ${V.bankTest ? `
+                  <div style="border:1px solid ${V.bankTest.ok ? GREEN : RED}55;background:${V.bankTest.ok ? GREEN : RED}0f;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px">
+                    <span style="font-size:13.5px;font-weight:600;color:${V.bankTest.ok ? GREEN : RED}">${esc(V.bankTest.message || (V.bankTest.ok ? 'Success' : 'Failed'))}</span>
+                    ${V.bankTest.ok && V.bankTest.countries && V.bankTest.countries.length ? `<span style="font-size:12px;color:${GREY}">${V.bankTest.bank_count} bank(s) across: ${esc(V.bankTest.countries.join(', '))}</span>` : ''}
+                  </div>` : ''}
+              </div>
+            </div>` : ''}
+
+          ${V.isDisconnectBankModal ? `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <p style="margin:0;font-size:14px;color:${GREY};line-height:1.5">
+                Disconnect <strong style="color:${TH.text}">${esc(V.disconnectBankName)}</strong>? MerlitoMoney stops fetching new transactions from it, but everything already imported and its account mapping stay exactly as they are. Reconnecting later means re-authorising at the bank from scratch.
+              </p>
+              <button data-click="${H(V.onDisconnectBank)}" style="border:0;background:${TH.surface};color:${RED};border-radius:12px;padding:13px;cursor:pointer;font-weight:600">Disconnect</button>
             </div>` : ''}
 
           ${V.isAboutModal ? `
